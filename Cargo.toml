@@ -1,0 +1,49 @@
+[package]
+name = "palate"
+version = "0.1.0"
+edition = "2021"
+authors = ["Ivan <monkslc@gmail.com>"]
+description = "File type detection combining tft and hyperpolyglot"
+license = "GPL-3.0-or-later OR MIT OR Apache-2.0"
+repository = "https://github.com/casualjim/palate"
+readme = "README.md"
+keywords = ["file-type", "detection", "language", "syntax", "linguist"]
+categories = ["parser-implementations", "development-tools"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = ["detect"]
+
+## Provide the [`detect`](crate::detect) and [`try_detect`](crate::try_detect) functions for detecting a
+## file type from a path and file content
+detect = [
+    "dep:aho-corasick",
+    "dep:lazy-regex",
+    "dep:once_cell",
+    "dep:phf",
+    "dep:regex",
+    "dep:pcre2",
+]
+
+## Provide [`serde::Serialize`] and [`serde::Deserialize`] implementations for [`FileType`]
+serde = ["dep:serde", "dep:serde_with"]
+
+## Enable classifier-based detection
+classifier = ["detect"]
+
+[dependencies]
+aho-corasick = { version = "1.0", optional = true }
+casey = "0.4"
+lazy-regex = { version = "3.0", optional = true }
+once_cell = { version = "1.18", optional = true }
+pcre2 = { version = "0.2", optional = true }
+phf = { version = "0.11", features = ["macros"], optional = true }
+regex = { version = "1.9", optional = true }
+serde = { version = "1.0", optional = true, features = ["derive"] }
+serde_with = { version = "3.1", optional = true }
+strum = { version = "0.25", features = ["derive", "phf"] }
+
+[dev-dependencies]
+serde_yaml = "0.9"
