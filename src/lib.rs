@@ -58,4 +58,18 @@ mod tests {
             detect(Path::new("a/b/c/queries/highlights.scm"), "")
         );
     }
+
+    #[test]
+    fn test_variants_parse() {
+        use std::str::FromStr;
+        // Test various variants to find which ones fail
+        assert!(FileType::from_str("text").is_ok(), "text should parse");
+        assert!(FileType::from_str("8th").is_ok(), "8th should parse");
+        assert!(FileType::from_str("a2ps").is_ok(), "a2ps should parse");
+        assert!(FileType::from_str("ada").is_ok(), "ada should parse");
+        assert!(FileType::from_str("agda").is_ok(), "agda should parse");
+        assert!(FileType::from_str("bash").is_ok(), "bash should parse");
+        assert!(FileType::from_str("rust").is_ok(), "rust should parse");
+        assert!(FileType::from_str("python").is_ok(), "python should parse");
+    }
 }

@@ -3,97 +3,75 @@
 //! This module provides disambiguation rules for file extensions that map to
 //! multiple possible languages. It uses the regex patterns defined in heuristics.yml.
 
+use pcre2::bytes::RegexBuilder as PCRERegex;
 use std::path::Path;
 
 use crate::FileType;
+
+// Include the generated disambiguation map
+include!("../codegen/disambiguation-heuristics-map.rs");
+
+#[derive(Debug)]
+enum Pattern {
+    And(&'static [Pattern]),
+    Negative(&'static str),
+    Or(&'static [Pattern]),
+    Positive(&'static str),
+}
+
+#[derive(Debug)]
+struct Rule {
+    languages: &'static [FileType],
+    pattern: Option<Pattern>,
+}
+
+impl Pattern {
+    fn matches(&self, content: &str) -> bool {
+        match self {
+            Pattern::Positive(pattern) => {
+                let regex = PCRERegex::new()
+                    .crlf(true)
+                    .multi_line(true)
+                    .build(pattern)
+                    .unwrap();
+                regex.is_match(content.as_bytes()).unwrap_or(false)
+            }
+            Pattern::Negative(pattern) => {
+                let regex = PCRERegex::new()
+                    .crlf(true)
+                    .multi_line(true)
+                    .build(pattern)
+                    .unwrap();
+                !regex.is_match(content.as_bytes()).unwrap_or(true)
+            }
+            Pattern::Or(patterns) => patterns.iter().any(|pattern| pattern.matches(content)),
+            Pattern::And(patterns) => patterns.iter().all(|pattern| pattern.matches(content)),
+        }
+    }
+}
 
 /// Apply heuristic-based detection for ambiguous extensions.
 ///
 /// This is called when a file extension could match multiple languages.
 /// The patterns are evaluated in order; the first match wins.
 pub(crate) fn apply_heuristics(extension: &str, _path: &Path, content: &str) -> Option<FileType> {
-    // For now, return None - this indicates heuristics didn't match
-    // The full implementation would parse heuristics.yml and apply the rules
-
-    // Example heuristics for common ambiguous extensions:
-    match extension {
-        ".h" | ".hpp" | ".hxx" => disambiguate_header(content),
-        ".m" => disambiguate_m(content),
-        ".fs" => disambiguate_fs(content),
-        ".pl" => disambiguate_pl(content),
-        ".pm" => disambiguate_pm(content),
-        _ => None,
-    }
-}
-
-/// Disambiguate .h files (could be C, C++, Objective-C)
-fn disambiguate_header(content: &str) -> Option<FileType> {
-    // Check for Objective-C keywords
-    for line in content.lines().take(200) {
-        if line.contains("@interface") || line.contains("@end") || line.contains("@class") {
-            return Some(FileType::ObjC);
+    match DISAMBIGUATIONS.get(extension) {
+        Some(rules) => {
+            for rule in rules.iter() {
+                if let Some(pattern) = &rule.pattern {
+                    if pattern.matches(content) {
+                        // Return first language from the rule
+                        return rule.languages.first().copied();
+                    };
+                } else {
+                    // if there is no pattern then it is a match by default
+                    return rule.languages.first().copied();
+                };
+            }
+            None
         }
+        None => None,
     }
-    // Default to C
-    Some(FileType::C)
-}
-
-/// Disambiguate .m files (could be MATLAB, Objective-C, Mathematica, etc.)
-fn disambiguate_m(content: &str) -> Option<FileType> {
-    // MATLAB comments start with %
-    for line in content.lines().take(50) {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with('%') {
-            return Some(FileType::Matlab);
-        }
-        if trimmed.starts_with("//") || trimmed.contains("@interface") {
-            return Some(FileType::ObjC);
-        }
-    }
-    // Default to Objective-C as it's more common
-    Some(FileType::ObjC)
-}
-
-/// Disambiguate .fs files (could be F#, Forth)
-fn disambiguate_fs(content: &str) -> Option<FileType> {
-    // Forth uses : ( colon ) for definitions
-    for line in content.lines().take(50) {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with(':') || trimmed.starts_with('\\') {
-            return Some(FileType::Forth);
-        }
-    }
-    // Default to F#
-    Some(FileType::FSharp)
-}
-
-/// Disambiguate .pl files (could be Perl, Prolog)
-fn disambiguate_pl(content: &str) -> Option<FileType> {
-    let first_non_empty = content.lines().find(|l| !l.trim().is_empty())?;
-
-    // Prolog facts/rules start with lowercase and contain :-
-    if first_non_empty.contains(":-") {
-        return Some(FileType::Prolog);
-    }
-
-    // Perl shebang
-    if first_non_empty.starts_with("#!") && first_non_empty.contains("perl") {
-        return Some(FileType::Perl);
-    }
-
-    // Default to Perl
-    Some(FileType::Perl)
-}
-
-/// Disambiguate .pm files (could be Perl, XPM image)
-fn disambiguate_pm(content: &str) -> Option<FileType> {
-    // XPM files have a specific header
-    let first_line = content.lines().next()?;
-    if first_line.contains("XPM") {
-        return Some(FileType::Xpm);
-    }
-    // Default to Perl
-    Some(FileType::Perl)
 }
 
 #[cfg(test)]
@@ -101,32 +79,47 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_disambiguate_header_objc() {
-        let objc = "@interface MyClass\n@end";
-        assert_eq!(Some(FileType::ObjC), disambiguate_header(objc));
+    fn test_heuristics_csharp() {
+        let content = "using System;";
+        assert_eq!(
+            apply_heuristics(".cs", Path::new("test.cs"), content),
+            Some(FileType::CSharp)
+        );
     }
 
     #[test]
-    fn test_disambiguate_header_c() {
-        let c = "#ifndef HEADER_H\n#define HEADER_H\n#endif";
-        assert_eq!(Some(FileType::C), disambiguate_header(c));
+    fn test_heuristics_cpp() {
+        let content = "    #include <vector>";
+        assert_eq!(
+            apply_heuristics(".h", Path::new("test.h"), content),
+            Some(FileType::Cpp)
+        );
     }
 
     #[test]
-    fn test_disambiguate_m_matlab() {
-        let matlab = "% MATLAB comment\nx = 1;";
-        assert_eq!(Some(FileType::Matlab), disambiguate_m(matlab));
+    fn test_heuristics_objc() {
+        let content = "@interface MyClass";
+        assert_eq!(
+            apply_heuristics(".h", Path::new("test.h"), content),
+            Some(FileType::ObjC)
+        );
     }
 
     #[test]
-    fn test_disambiguate_pl_prolog() {
-        let prolog = "parent(X, Y) :- ancestor(X, Y).";
-        assert_eq!(Some(FileType::Prolog), disambiguate_pl(prolog));
+    fn test_heuristics_c_default() {
+        let content = "random content that doesn't match any pattern";
+        assert_eq!(
+            apply_heuristics(".h", Path::new("test.h"), content),
+            Some(FileType::C) // Default fallback (no pattern)
+        );
     }
 
     #[test]
-    fn test_disambiguate_pl_perl() {
-        let perl = "use strict;\nmy $x = 1;";
-        assert_eq!(Some(FileType::Perl), disambiguate_pl(perl));
+    fn test_heuristics_unknown_extension() {
+        let content = "anything";
+        assert_eq!(
+            apply_heuristics(".xyz", Path::new("test.xyz"), content),
+            None
+        );
     }
 }

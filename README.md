@@ -2,13 +2,21 @@
 
 File type detection combining the best of `tft` and `hyperpolyglot`.
 
+## Acknowledgments
+
+This project is a reassembly of code from several excellent projects:
+
+- **[tft](https://github.com/RubixDev/tft)** - Tree-sitter File Type, providing fast file type detection using tree-sitter grammars
+- **[Neovim](https://github.com/neovim/neovim)** - The original source of filetype detection heuristics and patterns
+- **[hyperpolyglot](https://github.com/monkslc/hyperpolyglot)** - Language detection library with comprehensive language patterns
+
+This crate essentially combines and curates the detection logic from these sources into a unified, ergonomic API.
+
 ## License
 
-This crate is dual-licensed under:
-- GPL-3.0-or-later (from tft)
-- MIT OR Apache-2.0 (from hyperpolyglot)
+GPL-3.0-or-later
 
-You may choose either license for your use.
+This project is derived from [tft](https://github.com/RubixDev/tft) (GPL-3.0-or-later), which itself incorporates code from [Neovim](https://github.com/neovim/neovim) (Apache-2.0/Vim license). As a derivative of GPL-3.0 work, this project is licensed under GPL-3.0-or-later.
 
 ## Features
 

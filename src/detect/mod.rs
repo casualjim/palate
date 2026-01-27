@@ -1,6 +1,8 @@
 use std::path::Path;
 
 use aho_corasick::AhoCorasick;
+use infer::Infer;
+
 use lazy_regex::{lazy_regex, regex, regex_is_match};
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -19,6 +21,12 @@ mod path_suffix;
 mod pattern;
 mod shebang;
 mod util;
+
+#[cfg(feature = "tokio")]
+mod stream;
+
+#[cfg(feature = "tokio")]
+pub use stream::*;
 
 /// Same as [`try_detect`] but automatically falling back to [`FileType::Text`] where
 /// [`try_detect`] would return [`None`].
@@ -119,10 +127,21 @@ pub fn try_detect(path: impl AsRef<Path>, content: &str) -> Option<FileType> {
         }
     }
 
-    // file contents - fallback to heuristics and classifier
-    // Try heuristics for ambiguous extensions
+    // Try heuristics for ambiguous extensions (before file extension resolvers)
+    // This allows PCRE2 patterns to disambiguate extensions like .h, .cs, .e
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
         if let Some(ft) = heuristics::apply_heuristics(ext, path, content) {
+            return Some(ft);
+        }
+    }
+
+    // file extension (resolvers like header, euphoria, etc.)
+    if let Some(resolver) = path
+        .extension()
+        .and_then(|os_ext| os_ext.to_str())
+        .and_then(|ext| FILE_EXTENSION.get(ext))
+    {
+        if let Some(ft) = resolver.resolve(path, content) {
             return Some(ft);
         }
     }
@@ -138,12 +157,12 @@ pub fn try_detect(path: impl AsRef<Path>, content: &str) -> Option<FileType> {
 // Include all dynamic resolver functions from tft's detect.rs
 // These are kept as module-private functions used by the PHF maps
 
-pub(crate) fn asa(_path: &Path, _content: &str) -> Option<FileType> {
+fn asa(_path: &Path, _content: &str) -> Option<FileType> {
     // TODO: user defined preferred asa filetype
     Some(FileType::AspVbs)
 }
 
-pub(crate) fn asm(_path: &Path, content: &str) -> Option<FileType> {
+fn asm(_path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred asm syntax
     match util::findany(
         content,
@@ -156,7 +175,7 @@ pub(crate) fn asm(_path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn asp(_path: &Path, content: &str) -> Option<FileType> {
+fn asp(_path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred asp filetype
     match util::find(content, 3, false, "perlscript") {
         true => Some(FileType::AspPerl),
@@ -164,12 +183,12 @@ pub(crate) fn asp(_path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn bak(path: &Path, content: &str) -> Option<FileType> {
+fn bak(path: &Path, content: &str) -> Option<FileType> {
     // for files like `main.rs.bak` retry search without the `.bak` extension
     try_detect(path.with_extension(""), content)
 }
 
-pub(crate) fn bas(_path: &Path, content: &str) -> Option<FileType> {
+fn bas(_path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred bas filetype
     // Most frequent FreeBASIC-specific keywords in distro files
     let fb_keywords = regex!(
@@ -203,7 +222,7 @@ pub(crate) fn bas(_path: &Path, content: &str) -> Option<FileType> {
     Some(FileType::Basic)
 }
 
-pub(crate) fn bindzone(content: &str, default: Option<FileType>) -> Option<FileType> {
+fn bindzone(content: &str, default: Option<FileType>) -> Option<FileType> {
     match regex_is_match!(
         r"^; <<>> DiG [0-9\.]+.* <<>>|\$ORIGIN|\$TTL|IN\s+SOA",
         get_lines(content, 4)
@@ -213,12 +232,12 @@ pub(crate) fn bindzone(content: &str, default: Option<FileType>) -> Option<FileT
     }
 }
 
-pub(crate) fn btm(_path: &Path, _content: &str) -> Option<FileType> {
+fn btm(_path: &Path, _content: &str) -> Option<FileType> {
     // TODO: user defined dosbatch for btm
     Some(FileType::Btm)
 }
 
-pub(crate) fn cfg(_path: &Path, content: &str) -> Option<FileType> {
+fn cfg(_path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred cfg filetype
     match regex_is_match!(r"(eio|mmc|moc|proc|sio|sys):cfg"i, get_lines(content, 1)) {
         true => Some(FileType::Rapid),
@@ -226,7 +245,7 @@ pub(crate) fn cfg(_path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn change(_path: &Path, content: &str) -> Option<FileType> {
+fn change(_path: &Path, content: &str) -> Option<FileType> {
     if regex_is_match!(r"^(#|!)", get_lines(content, 1)) {
         return Some(FileType::Ch);
     }
@@ -244,14 +263,14 @@ pub(crate) fn change(_path: &Path, content: &str) -> Option<FileType> {
     Some(FileType::Chill)
 }
 
-pub(crate) fn changelog(_path: &Path, content: &str) -> Option<FileType> {
+fn changelog(_path: &Path, content: &str) -> Option<FileType> {
     match util::find(content, 1, false, "; urgency=") {
         true => Some(FileType::DebChangelog),
         false => Some(FileType::Changelog),
     }
 }
 
-pub(crate) fn cls(_path: &Path, content: &str) -> Option<FileType> {
+fn cls(_path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred cls filetype
     let first_line = get_lines(content, 1);
     if regex_is_match!(r"^[%\\]", first_line) {
@@ -271,46 +290,46 @@ pub(crate) fn cls(_path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn cmd(_path: &Path, content: &str) -> Option<FileType> {
+fn cmd(_path: &Path, content: &str) -> Option<FileType> {
     match content.starts_with("/*") {
         true => Some(FileType::Rexx),
         false => Some(FileType::DosBatch),
     }
 }
 
-pub(crate) fn control(_path: &Path, content: &str) -> Option<FileType> {
+fn control(_path: &Path, content: &str) -> Option<FileType> {
     match content.starts_with("Source:") {
         true => Some(FileType::DebControl),
         false => None,
     }
 }
 
-pub(crate) fn copyright(_path: &Path, content: &str) -> Option<FileType> {
+fn copyright(_path: &Path, content: &str) -> Option<FileType> {
     match content.starts_with("Format:") {
         true => Some(FileType::DebCopyright),
         false => None,
     }
 }
 
-pub(crate) fn cpp(_path: &Path, _content: &str) -> Option<FileType> {
+fn cpp(_path: &Path, _content: &str) -> Option<FileType> {
     // TODO: user defined cynlib for cpp
     Some(FileType::Cpp)
 }
 
-pub(crate) fn cpy(_path: &Path, content: &str) -> Option<FileType> {
+fn cpy(_path: &Path, content: &str) -> Option<FileType> {
     match content.starts_with("##") {
         true => Some(FileType::Python),
         false => Some(FileType::Cobol),
     }
 }
 
-pub(crate) fn csh(_path: &Path, content: &str) -> Option<FileType> {
+fn csh(_path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred csh filetype
     // TODO: user defined preferred shell filetype
     shell(content, FileType::Csh)
 }
 
-pub(crate) fn dat(path: &Path, content: &str) -> Option<FileType> {
+fn dat(path: &Path, content: &str) -> Option<FileType> {
     if path
         .file_name()
         .and_then(|os_name| os_name.to_str())
@@ -327,7 +346,7 @@ pub(crate) fn dat(path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn decl(_path: &Path, content: &str) -> Option<FileType> {
+fn decl(_path: &Path, content: &str) -> Option<FileType> {
     for line in content.lines().take(3) {
         if regex_is_match!(r"^<!sgml"i, line) {
             return Some(FileType::SgmlDecl);
@@ -336,7 +355,7 @@ pub(crate) fn decl(_path: &Path, content: &str) -> Option<FileType> {
     None
 }
 
-pub(crate) fn dep3patch(path: &Path, content: &str) -> Option<FileType> {
+fn dep3patch(path: &Path, content: &str) -> Option<FileType> {
     let filename = path.file_name()?.to_str()?;
     if filename == "series" {
         return None;
@@ -368,14 +387,14 @@ pub(crate) fn dep3patch(path: &Path, content: &str) -> Option<FileType> {
     None
 }
 
-pub(crate) fn dsl(_path: &Path, content: &str) -> Option<FileType> {
+fn dsl(_path: &Path, content: &str) -> Option<FileType> {
     match regex_is_match!(r"^\s*<!", get_lines(content, 1)) {
         true => Some(FileType::Dsl),
         false => Some(FileType::Structurizr),
     }
 }
 
-pub(crate) fn dtrace(_path: &Path, content: &str) -> Option<FileType> {
+fn dtrace(_path: &Path, content: &str) -> Option<FileType> {
     for line in content.lines().take(100) {
         if regex_is_match!(r"^(module|import)\b"i, line) {
             return Some(FileType::D);
@@ -386,7 +405,7 @@ pub(crate) fn dtrace(_path: &Path, content: &str) -> Option<FileType> {
     Some(FileType::D)
 }
 
-pub(crate) fn e(_path: &Path, content: &str) -> Option<FileType> {
+fn e(_path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred euphoria filetype
     for line in content.lines().take(100) {
         if regex_is_match!(r"^\s*<'\s*$|^\s*'>\s*$", line) {
@@ -396,14 +415,14 @@ pub(crate) fn e(_path: &Path, content: &str) -> Option<FileType> {
     Some(FileType::Eiffel)
 }
 
-pub(crate) fn edn(_path: &Path, content: &str) -> Option<FileType> {
+fn edn(_path: &Path, content: &str) -> Option<FileType> {
     match regex_is_match!(r"^\s*\(\s*edif\b"i, get_lines(content, 1)) {
         true => Some(FileType::Edif),
         false => Some(FileType::Clojure),
     }
 }
 
-pub(crate) fn ent(_path: &Path, content: &str) -> Option<FileType> {
+fn ent(_path: &Path, content: &str) -> Option<FileType> {
     for line in content.lines().take(5) {
         if regex_is_match!(r"^\s*[#{]", line) {
             return Some(FileType::Cl);
@@ -416,12 +435,12 @@ pub(crate) fn ent(_path: &Path, content: &str) -> Option<FileType> {
     Some(FileType::Dtd)
 }
 
-pub(crate) fn euphoria(_path: &Path, _content: &str) -> Option<FileType> {
+fn euphoria(_path: &Path, _content: &str) -> Option<FileType> {
     // TODO: user defined preferred euphoria filetype
     Some(FileType::Euphoria3)
 }
 
-pub(crate) fn ex(_path: &Path, content: &str) -> Option<FileType> {
+fn ex(_path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred euphoria filetype
     for line in content.lines().take(100) {
         if regex_is_match!(r"^(--|ifdef\b|include\b)", line) {
@@ -431,7 +450,7 @@ pub(crate) fn ex(_path: &Path, content: &str) -> Option<FileType> {
     Some(FileType::Elixir)
 }
 
-pub(crate) fn foam(_path: &Path, content: &str) -> Option<FileType> {
+fn foam(_path: &Path, content: &str) -> Option<FileType> {
     let mut foam_file = false;
     for line in content.lines().take(15) {
         if line.contains("FoamFile") {
@@ -443,7 +462,7 @@ pub(crate) fn foam(_path: &Path, content: &str) -> Option<FileType> {
     None
 }
 
-pub(crate) fn frm(_path: &Path, content: &str) -> Option<FileType> {
+fn frm(_path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred frm filetype
     match util::findany(content, 5, false, ["BEGIN VB.Form", "BEGIN VB.MDIForm"]) {
         true => Some(FileType::Vb),
@@ -451,7 +470,7 @@ pub(crate) fn frm(_path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn fs(_path: &Path, content: &str) -> Option<FileType> {
+fn fs(_path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred fs filetype
     for line in content.lines().take(100) {
         if line.starts_with([':', '(', '\\']) {
@@ -461,21 +480,21 @@ pub(crate) fn fs(_path: &Path, content: &str) -> Option<FileType> {
     Some(FileType::FSharp)
 }
 
-pub(crate) fn fvwm(path: &Path, _content: &str) -> Option<FileType> {
+fn fvwm(path: &Path, _content: &str) -> Option<FileType> {
     match path.extension().is_some_and(|ext| ext == "m4") {
         true => Some(FileType::Fvwm2M4),
         false => Some(FileType::Fvwm2),
     }
 }
 
-pub(crate) fn git(_path: &Path, content: &str) -> Option<FileType> {
+fn git(_path: &Path, content: &str) -> Option<FileType> {
     match regex_is_match!(r"^[a-fA-F0-9]{40,}\b|^ref: ", get_lines(content, 1)) {
         true => Some(FileType::Git),
         false => None,
     }
 }
 
-pub(crate) fn header(_path: &Path, content: &str) -> Option<FileType> {
+fn header(_path: &Path, content: &str) -> Option<FileType> {
     for line in content.lines().take(200) {
         if regex_is_match!(r"^@(interface|end|class)"i, line) {
             // TODO: allow setting C or C++
@@ -486,14 +505,14 @@ pub(crate) fn header(_path: &Path, content: &str) -> Option<FileType> {
     Some(FileType::C)
 }
 
-pub(crate) fn hook(_path: &Path, content: &str) -> Option<FileType> {
+fn hook(_path: &Path, content: &str) -> Option<FileType> {
     match get_lines(content, 1) == "[Trigger]" {
         true => Some(FileType::Conf),
         false => None,
     }
 }
 
-pub(crate) fn html(_path: &Path, content: &str) -> Option<FileType> {
+fn html(_path: &Path, content: &str) -> Option<FileType> {
     for line in content.lines().take(10) {
         if regex_is_match!(r"\bDTD\s+XHTML\s", line) {
             return Some(FileType::Xhtml);
@@ -504,14 +523,14 @@ pub(crate) fn html(_path: &Path, content: &str) -> Option<FileType> {
     Some(FileType::Html)
 }
 
-pub(crate) fn hw(_path: &Path, content: &str) -> Option<FileType> {
+fn hw(_path: &Path, content: &str) -> Option<FileType> {
     match util::find(content, 1, false, "<?php") {
         true => Some(FileType::Php),
         false => Some(FileType::Virata),
     }
 }
 
-pub(crate) fn idl(_path: &Path, content: &str) -> Option<FileType> {
+fn idl(_path: &Path, content: &str) -> Option<FileType> {
     for line in content.lines().take(50) {
         if regex_is_match!(r#"^\s*import\s+"(unknwn|objidl)"\.idl"#i, line) {
             return Some(FileType::Msidl);
@@ -520,7 +539,7 @@ pub(crate) fn idl(_path: &Path, content: &str) -> Option<FileType> {
     Some(FileType::Idl)
 }
 
-pub(crate) fn in_(path: &Path, content: &str) -> Option<FileType> {
+fn in_(path: &Path, content: &str) -> Option<FileType> {
     if path.file_name().is_some_and(|name| name == "configure.in") {
         return bak(path, content);
     }
@@ -531,7 +550,7 @@ static PASCAL_KEYWORDS: Lazy<Regex> =
     lazy_regex!(r"^\s*(program|unit|library|uses|begin|procedure|function|const|type|var)\b"i);
 static PASCAL_COMMENTS: Lazy<Regex> = lazy_regex!(r"^\s*(\{|\(\*|//)");
 
-pub(crate) fn inc(path: &Path, content: &str) -> Option<FileType> {
+fn inc(path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred inc filetype
     let lines = get_lines(content, 3);
     if util::find(lines, 0, false, "perlscript") {
@@ -558,7 +577,7 @@ pub(crate) fn inc(path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn inp(_path: &Path, content: &str) -> Option<FileType> {
+fn inp(_path: &Path, content: &str) -> Option<FileType> {
     if content.starts_with('*') {
         return Some(FileType::Abaqus);
     }
@@ -570,14 +589,14 @@ pub(crate) fn inp(_path: &Path, content: &str) -> Option<FileType> {
     None
 }
 
-pub(crate) fn install(_path: &Path, content: &str) -> Option<FileType> {
+fn install(_path: &Path, content: &str) -> Option<FileType> {
     match util::find(content, 1, false, "<?php") {
         true => Some(FileType::Php),
         false => sh(content, Some(FileType::Bash)),
     }
 }
 
-pub(crate) fn log(path: &Path, _content: &str) -> Option<FileType> {
+fn log(path: &Path, _content: &str) -> Option<FileType> {
     let path = path.to_str();
     if path.is_some_and(|path| regex_is_match!(r"upstream([.-].*)?\.log|.*\.upstream\.log"i, path))
     {
@@ -602,7 +621,7 @@ pub(crate) fn log(path: &Path, _content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn lpc(_path: &Path, content: &str) -> Option<FileType> {
+fn lpc(_path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined allow lpc
     for line in content.lines().take(12) {
         if util::starts_with_any(
@@ -626,7 +645,7 @@ pub(crate) fn lpc(_path: &Path, content: &str) -> Option<FileType> {
     Some(FileType::C)
 }
 
-pub(crate) fn lsl(_path: &Path, content: &str) -> Option<FileType> {
+fn lsl(_path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred lsl filetype
     match util::next_non_blank(content, 0)
         .is_some_and(|line| regex_is_match!(r"^\s*%|:\s*trait\s*$", line))
@@ -636,7 +655,7 @@ pub(crate) fn lsl(_path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn m(_path: &Path, content: &str) -> Option<FileType> {
+fn m(_path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred m filetype
     let octave_block_terminators = regex!(
         r"(^|;)\s*\bend(_try_catch|classdef|enumeration|events|methods|parfor|properties)\b"i
@@ -681,7 +700,7 @@ pub(crate) fn m(_path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn m4_ext(path: &Path, _content: &str) -> Option<FileType> {
+fn m4_ext(path: &Path, _content: &str) -> Option<FileType> {
     match !path.to_str().is_some_and(|p| p.ends_with("html.m4"))
         && !path.to_str().is_some_and(|p| p.contains("fvwm2rc"))
     {
@@ -690,7 +709,7 @@ pub(crate) fn m4_ext(path: &Path, _content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn mc(_path: &Path, content: &str) -> Option<FileType> {
+fn mc(_path: &Path, content: &str) -> Option<FileType> {
     for line in content.lines().take(20) {
         let trimmed_line = line.trim_start();
         if util::starts_with_any(trimmed_line, false, ["#", "dnl"]) {
@@ -702,7 +721,7 @@ pub(crate) fn mc(_path: &Path, content: &str) -> Option<FileType> {
     Some(FileType::M4)
 }
 
-pub(crate) fn me(path: &Path, _content: &str) -> Option<FileType> {
+fn me(path: &Path, _content: &str) -> Option<FileType> {
     match path.file_name().is_some_and(|name| {
         name.eq_ignore_ascii_case("read.me") || name.eq_ignore_ascii_case("click.me")
     }) {
@@ -711,7 +730,7 @@ pub(crate) fn me(path: &Path, _content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn mm(_path: &Path, content: &str) -> Option<FileType> {
+fn mm(_path: &Path, content: &str) -> Option<FileType> {
     for line in content.lines().take(20) {
         if regex_is_match!(r"^\s*(#\s*(include|import)\b|@import\b|/\*)"i, line) {
             return Some(FileType::ObjCpp);
@@ -720,7 +739,7 @@ pub(crate) fn mm(_path: &Path, content: &str) -> Option<FileType> {
     Some(FileType::Nroff)
 }
 
-pub(crate) fn mms(_path: &Path, content: &str) -> Option<FileType> {
+fn mms(_path: &Path, content: &str) -> Option<FileType> {
     for line in content.lines().take(20) {
         let trimmed_line = line.trim_start();
         if util::starts_with_any(trimmed_line, true, ["%", "//", "*"]) {
@@ -732,7 +751,7 @@ pub(crate) fn mms(_path: &Path, content: &str) -> Option<FileType> {
     Some(FileType::Mmix)
 }
 
-pub(crate) fn is_lprolog(content: &str) -> bool {
+fn is_lprolog(content: &str) -> bool {
     for line in content.lines().take(500) {
         let trimmed_line = line.trim_start();
         if !trimmed_line.is_empty() && !trimmed_line.starts_with('%') {
@@ -742,12 +761,12 @@ pub(crate) fn is_lprolog(content: &str) -> bool {
     false
 }
 
-pub(crate) fn is_rapid(content: &str) -> bool {
+fn is_rapid(content: &str) -> bool {
     util::next_non_blank(content, 0)
         .is_some_and(|line| regex_is_match!(r"^\s*(%{3}|module\s+\w+\s*(\(|$))"i, line))
 }
 
-pub(crate) fn mod_(path: &Path, content: &str) -> Option<FileType> {
+fn mod_(path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred mod filetype
     if path
         .file_name()
@@ -767,14 +786,14 @@ pub(crate) fn mod_(path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn news(_path: &Path, content: &str) -> Option<FileType> {
+fn news(_path: &Path, content: &str) -> Option<FileType> {
     match util::find(content, 1, false, "; urgency=") {
         true => Some(FileType::DebChangelog),
         false => None,
     }
 }
 
-pub(crate) fn nroff(_path: &Path, content: &str) -> Option<FileType> {
+fn nroff(_path: &Path, content: &str) -> Option<FileType> {
     for line in content.lines().take(5) {
         if line.starts_with('.') {
             return Some(FileType::Nroff);
@@ -783,7 +802,7 @@ pub(crate) fn nroff(_path: &Path, content: &str) -> Option<FileType> {
     None
 }
 
-pub(crate) fn patch(_path: &Path, content: &str) -> Option<FileType> {
+fn patch(_path: &Path, content: &str) -> Option<FileType> {
     match regex_is_match!(
         r"^From [a-fA-F0-9]{40}+ Mon Sep 17 00:00:00 2001$",
         get_lines(content, 1)
@@ -793,7 +812,7 @@ pub(crate) fn patch(_path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn perl(path: &Path, content: &str) -> Option<FileType> {
+fn perl(path: &Path, content: &str) -> Option<FileType> {
     match (path.extension().is_some_and(|ext| ext == "t")
         && path
             .parent()
@@ -810,7 +829,7 @@ pub(crate) fn perl(path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn pl(_path: &Path, content: &str) -> Option<FileType> {
+fn pl(_path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred pl filetype
     match util::next_non_blank(content, 0)
         .is_some_and(|line| regex_is_match!(r":-|\bprolog\b|^\s*(%+(\s|$)|/\*)"i, line))
@@ -820,7 +839,7 @@ pub(crate) fn pl(_path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn pm(_path: &Path, content: &str) -> Option<FileType> {
+fn pm(_path: &Path, content: &str) -> Option<FileType> {
     let line = get_lines(content, 1);
     if line.contains("XPM2") {
         Some(FileType::Xpm2)
@@ -831,7 +850,7 @@ pub(crate) fn pm(_path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn pp(_path: &Path, content: &str) -> Option<FileType> {
+fn pp(_path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred pp filetype
     match util::next_non_blank(content, 0)
         .is_some_and(|line| PASCAL_COMMENTS.is_match(line) || PASCAL_KEYWORDS.is_match(line))
@@ -841,7 +860,7 @@ pub(crate) fn pp(_path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn prg(_path: &Path, content: &str) -> Option<FileType> {
+fn prg(_path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred prg filetype
     match is_rapid(content) {
         true => Some(FileType::Rapid),
@@ -849,7 +868,7 @@ pub(crate) fn prg(_path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn progress_asm(path: &Path, content: &str) -> Option<FileType> {
+fn progress_asm(path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred i filetype
     for line in content.lines().take(10) {
         let trimmed_line = line.trim_start();
@@ -862,7 +881,7 @@ pub(crate) fn progress_asm(path: &Path, content: &str) -> Option<FileType> {
     Some(FileType::Progress)
 }
 
-pub(crate) fn progress_cweb(_path: &Path, content: &str) -> Option<FileType> {
+fn progress_cweb(_path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred w filetype
     match util::starts_with_any(content, false, ["&analyze"])
         || content
@@ -875,7 +894,7 @@ pub(crate) fn progress_cweb(_path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn progress_pascal(_path: &Path, content: &str) -> Option<FileType> {
+fn progress_pascal(_path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred p filetype
     for line in content.lines().take(10) {
         if PASCAL_COMMENTS.is_match(line) || PASCAL_KEYWORDS.is_match(line) {
@@ -887,7 +906,7 @@ pub(crate) fn progress_pascal(_path: &Path, content: &str) -> Option<FileType> {
     Some(FileType::Progress)
 }
 
-pub(crate) fn proto(content: &str, default: FileType) -> Option<FileType> {
+fn proto(content: &str, default: FileType) -> Option<FileType> {
     // Cproto files have a comment in the first line and a function prototype in
     // the second line, it always ends in `;`. Indent files may also have
     // comments, thus we can't match comments to see the difference.
@@ -907,7 +926,7 @@ pub(crate) fn proto(content: &str, default: FileType) -> Option<FileType> {
     }
 }
 
-pub(crate) fn psf(_path: &Path, content: &str) -> Option<FileType> {
+fn psf(_path: &Path, content: &str) -> Option<FileType> {
     let trimmed_line = get_lines(content, 1).trim();
     match [
         "distribution",
@@ -924,7 +943,7 @@ pub(crate) fn psf(_path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn r(_path: &Path, content: &str) -> Option<FileType> {
+fn r(_path: &Path, content: &str) -> Option<FileType> {
     // Rebol is easy to recognize, check for that first
     if regex_is_match!(r"\brebol\b"i, get_lines(content, 50)) {
         return Some(FileType::Rebol);
@@ -945,7 +964,7 @@ pub(crate) fn r(_path: &Path, content: &str) -> Option<FileType> {
     Some(FileType::R)
 }
 
-pub(crate) fn rc(path: &Path, _content: &str) -> Option<FileType> {
+fn rc(path: &Path, _content: &str) -> Option<FileType> {
     match path
         .to_str()
         .is_some_and(|str| str.contains("/etc/Muttrc.d/"))
@@ -955,7 +974,7 @@ pub(crate) fn rc(path: &Path, _content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn redif(_path: &Path, content: &str) -> Option<FileType> {
+fn redif(_path: &Path, content: &str) -> Option<FileType> {
     for line in content.lines().take(5) {
         if util::starts_with_any(line, false, ["template-type:"]) {
             return Some(FileType::Redif);
@@ -964,7 +983,7 @@ pub(crate) fn redif(_path: &Path, content: &str) -> Option<FileType> {
     None
 }
 
-pub(crate) fn reg(_path: &Path, content: &str) -> Option<FileType> {
+fn reg(_path: &Path, content: &str) -> Option<FileType> {
     match regex_is_match!(
         r"^regedit[0-9]*\s*$|^windows registry editor version \d*\.\d*\s*$"i,
         get_lines(content, 1)
@@ -974,14 +993,14 @@ pub(crate) fn reg(_path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn rul(_path: &Path, content: &str) -> Option<FileType> {
+fn rul(_path: &Path, content: &str) -> Option<FileType> {
     match util::find(content, 6, false, "installshield") {
         true => Some(FileType::InstallShield),
         false => Some(FileType::Diva),
     }
 }
 
-pub(crate) fn rules(path: &Path, _content: &str) -> Option<FileType> {
+fn rules(path: &Path, _content: &str) -> Option<FileType> {
     let utf8_path = path.to_str();
     if utf8_path
         .is_some_and(|p| regex_is_match!(r"/(etc|(usr/)?lib)/udev/(rules\.d/)?.*\.rules$"i, p))
@@ -998,7 +1017,7 @@ pub(crate) fn rules(path: &Path, _content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn sc(_path: &Path, content: &str) -> Option<FileType> {
+fn sc(_path: &Path, content: &str) -> Option<FileType> {
     for line in content.lines().take(25) {
         if regex_is_match!(r"(class)?var\s<|\^this.*|\|\w+\||\+\s\w*\s\{|\*ar\s", line) {
             return Some(FileType::Supercollider);
@@ -1007,7 +1026,7 @@ pub(crate) fn sc(_path: &Path, content: &str) -> Option<FileType> {
     Some(FileType::Scala)
 }
 
-pub(crate) fn scd(_path: &Path, content: &str) -> Option<FileType> {
+fn scd(_path: &Path, content: &str) -> Option<FileType> {
     match regex_is_match!(
         r#"^\S+\(\d[0-9A-Za-z]*\)(\s+"[^"]*"]){0,2}"#,
         get_lines(content, 1)
@@ -1017,7 +1036,7 @@ pub(crate) fn scd(_path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn sgml(_path: &Path, content: &str) -> Option<FileType> {
+fn sgml(_path: &Path, content: &str) -> Option<FileType> {
     let lines = get_lines(content, 5);
     if lines.contains("linuxdoc") {
         Some(FileType::Smgllnx)
@@ -1028,7 +1047,7 @@ pub(crate) fn sgml(_path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn sh(content: &str, dialect: Option<FileType>) -> Option<FileType> {
+fn sh(content: &str, dialect: Option<FileType>) -> Option<FileType> {
     let dialect = dialect.unwrap_or_else(|| {
         let first_line = get_lines(content, 1);
         // try to detect from shebang
@@ -1051,7 +1070,7 @@ pub(crate) fn sh(content: &str, dialect: Option<FileType>) -> Option<FileType> {
     shell(content, dialect)
 }
 
-pub(crate) fn shell(content: &str, dialect: FileType) -> Option<FileType> {
+fn shell(content: &str, dialect: FileType) -> Option<FileType> {
     let mut prev_line = "";
     for (line_num, line) in content.lines().enumerate().take(1000) {
         // skip the first line
@@ -1072,7 +1091,7 @@ pub(crate) fn shell(content: &str, dialect: FileType) -> Option<FileType> {
     Some(dialect)
 }
 
-pub(crate) fn sig(_path: &Path, content: &str) -> Option<FileType> {
+fn sig(_path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred sig filetype
     let line = util::next_non_blank(content, 0)?;
     if regex_is_match!(r"^\s*(/\*|%|sig\s+[a-zA-Z])", line) {
@@ -1084,7 +1103,7 @@ pub(crate) fn sig(_path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn sil(_path: &Path, content: &str) -> Option<FileType> {
+fn sil(_path: &Path, content: &str) -> Option<FileType> {
     for line in content.lines().take(100) {
         let trimmed_line = line.trim_start();
         if trimmed_line.starts_with(['\\', '%']) {
@@ -1096,26 +1115,26 @@ pub(crate) fn sil(_path: &Path, content: &str) -> Option<FileType> {
     Some(FileType::Sil)
 }
 
-pub(crate) fn smi(_path: &Path, content: &str) -> Option<FileType> {
+fn smi(_path: &Path, content: &str) -> Option<FileType> {
     match regex_is_match!(r"\bsmil\b"i, get_lines(content, 1)) {
         true => Some(FileType::Smil),
         false => Some(FileType::Mib),
     }
 }
 
-pub(crate) fn smil(_path: &Path, content: &str) -> Option<FileType> {
+fn smil(_path: &Path, content: &str) -> Option<FileType> {
     match regex_is_match!(r"<\?\s*xml.*\?>", get_lines(content, 1)) {
         true => Some(FileType::Xml),
         false => Some(FileType::Smil),
     }
 }
 
-pub(crate) fn sql(_path: &Path, _content: &str) -> Option<FileType> {
+fn sql(_path: &Path, _content: &str) -> Option<FileType> {
     // TODO: user defined preferred sql filetype
     Some(FileType::Sql)
 }
 
-pub(crate) fn src(_path: &Path, content: &str) -> Option<FileType> {
+fn src(_path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred src filetype
     match util::next_non_blank(content, 0)
         .is_some_and(|line| regex_is_match!(r"^\s*(&\w+|(global\s+)?def(fct)?\b)"i, line))
@@ -1125,7 +1144,7 @@ pub(crate) fn src(_path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn sys(_path: &Path, content: &str) -> Option<FileType> {
+fn sys(_path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred sys filetype
     match is_rapid(content) {
         true => Some(FileType::Rapid),
@@ -1133,7 +1152,7 @@ pub(crate) fn sys(_path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn tex(path: &Path, content: &str) -> Option<FileType> {
+fn tex(path: &Path, content: &str) -> Option<FileType> {
     let first_line = get_lines(content, 1);
     if regex_is_match!(r"^%&\s*plain(tex)?", first_line) {
         Some(FileType::PlainTex)
@@ -1166,7 +1185,7 @@ pub(crate) fn tex(path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn tf(_path: &Path, content: &str) -> Option<FileType> {
+fn tf(_path: &Path, content: &str) -> Option<FileType> {
     for line in content.lines() {
         let trimmed_line = line.trim_start();
         if !trimmed_line.is_empty() && !trimmed_line.starts_with([';', '/']) {
@@ -1176,28 +1195,28 @@ pub(crate) fn tf(_path: &Path, content: &str) -> Option<FileType> {
     Some(FileType::Tf)
 }
 
-pub(crate) fn tmp(path: &Path, content: &str) -> Option<FileType> {
+fn tmp(path: &Path, content: &str) -> Option<FileType> {
     // for files like `main.rs~` retry search without the `~` suffix
     path.file_name()
         .and_then(|os_str| os_str.to_str())
         .and_then(|name| try_detect(path.with_file_name(&name[..name.len() - 1]), content))
 }
 
-pub(crate) fn ts(_path: &Path, content: &str) -> Option<FileType> {
+fn ts(_path: &Path, content: &str) -> Option<FileType> {
     match regex_is_match!(r"<\?\s*xml", get_lines(content, 1)) {
         true => Some(FileType::Xml),
         false => Some(FileType::Smil),
     }
 }
 
-pub(crate) fn ttl(_path: &Path, content: &str) -> Option<FileType> {
+fn ttl(_path: &Path, content: &str) -> Option<FileType> {
     match regex_is_match!(r"^@?(prefix|base)", get_lines(content, 1)) {
         true => Some(FileType::Turtle),
         false => Some(FileType::Teraterm),
     }
 }
 
-pub(crate) fn txt(_path: &Path, content: &str) -> Option<FileType> {
+fn txt(_path: &Path, content: &str) -> Option<FileType> {
     // vim helpfiles match *.txt but should have a modeline as last line
     match regex_is_match!(
         r"vim:.*ft=help",
@@ -1208,7 +1227,7 @@ pub(crate) fn txt(_path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
-pub(crate) fn typ(_path: &Path, content: &str) -> Option<FileType> {
+fn typ(_path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred typ filetype
     for line in content.lines().take(200) {
         if regex_is_match!(r"^(CASE\s*=\s*(SAME|LOWER|UPPER|OPPOSITE)$|TYPE\s)", line) {
@@ -1218,7 +1237,7 @@ pub(crate) fn typ(_path: &Path, content: &str) -> Option<FileType> {
     Some(FileType::Typst)
 }
 
-pub(crate) fn v(_path: &Path, content: &str) -> Option<FileType> {
+fn v(_path: &Path, content: &str) -> Option<FileType> {
     for line in content.lines().take(200) {
         if !line.trim_start().starts_with('/') {
             if regex_is_match!(r";\s*($|/)", line) {
@@ -1231,7 +1250,7 @@ pub(crate) fn v(_path: &Path, content: &str) -> Option<FileType> {
     Some(FileType::V)
 }
 
-pub(crate) fn web(_path: &Path, content: &str) -> Option<FileType> {
+fn web(_path: &Path, content: &str) -> Option<FileType> {
     for line in content.lines().take(5) {
         if line.starts_with('%') {
             return Some(FileType::Web);
@@ -1240,14 +1259,14 @@ pub(crate) fn web(_path: &Path, content: &str) -> Option<FileType> {
     Some(FileType::WinBatch)
 }
 
-pub(crate) fn xfree86(_path: &Path, content: &str) -> Option<FileType> {
+fn xfree86(_path: &Path, content: &str) -> Option<FileType> {
     match regex_is_match!(r"\bXConfigurator\b", get_lines(content, 1)) {
         true => Some(FileType::XF86Conf3),
         false => Some(FileType::XF86Conf),
     }
 }
 
-pub(crate) fn xml(_path: &Path, content: &str) -> Option<FileType> {
+fn xml(_path: &Path, content: &str) -> Option<FileType> {
     for line in content.lines().take(100) {
         if regex_is_match!(r"<!DOCTYPE.*DocBook", line) {
             return Some(FileType::DocBookXml4);
@@ -1260,14 +1279,14 @@ pub(crate) fn xml(_path: &Path, content: &str) -> Option<FileType> {
     Some(FileType::Xml)
 }
 
-pub(crate) fn xpm(_path: &Path, content: &str) -> Option<FileType> {
+fn xpm(_path: &Path, content: &str) -> Option<FileType> {
     match util::find(content, 1, true, "XPM2") {
         true => Some(FileType::Xpm2),
         false => Some(FileType::Xpm),
     }
 }
 
-pub(crate) fn y(_path: &Path, content: &str) -> Option<FileType> {
+fn y(_path: &Path, content: &str) -> Option<FileType> {
     for line in content.lines().take(100) {
         if line.trim_start().starts_with('%') {
             return Some(FileType::Yacc);
@@ -1280,7 +1299,7 @@ pub(crate) fn y(_path: &Path, content: &str) -> Option<FileType> {
     Some(FileType::Yacc)
 }
 
-pub(crate) fn make(path: &Path, _content: &str) -> Option<FileType> {
+fn make(path: &Path, _content: &str) -> Option<FileType> {
     // Check filename for specific makefile types
     let filename = path.file_name()?.to_str()?;
     if filename == "BSDmakefile" {
@@ -1291,4 +1310,30 @@ pub(crate) fn make(path: &Path, _content: &str) -> Option<FileType> {
         return Some(FileType::Make);
     }
     Some(FileType::Make)
+}
+
+/// Check if a file is text (not binary).
+///
+/// Uses the `infer` crate for binary detection, with `try_detect`
+/// as a fallback for unknown files.
+///
+/// Returns `true` if the file appears to be text, `false` if it appears to be binary.
+///
+/// # Example
+/// ```
+/// # #[cfg(feature = "detect")] {
+/// use palate::is_text_file;
+/// use std::path::Path;
+///
+/// assert!(is_text_file(Path::new("main.rs")));
+/// assert!(is_text_file(Path::new("script.py")));
+/// # }
+/// ```
+pub fn is_text_file(path: &Path) -> bool {
+    let infer = Infer::new();
+    if let Ok(Some(file_type)) = infer.get_from_path(path) {
+        return file_type.matcher_type() == infer::MatcherType::Text;
+    }
+
+    try_detect(path, "").is_some()
 }

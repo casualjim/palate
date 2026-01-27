@@ -10,6 +10,10 @@ const neovimFile = "/home/ivan/github/neovim/neovim/runtime/lua/vim/filetype.lua
 const neovimDetectFile = "/home/ivan/github/neovim/neovim/runtime/lua/vim/filetype/detect.lua";
 const baseDir = "/home/ivan/github/casualjim/palate";
 
+// Ground truth: grammars.json from breeze-tree-sitter-parsers
+const grammarsJsonPath = "/home/ivan/github/casualjim/breeze-tree-sitter-parsers/grammars.json";
+const grammarsMappingPath = "/home/ivan/github/casualjim/palate/target/grammars-mapping-enhanced.json";
+
 // Reference mapping extracted from rubixdev/tft/src/list.rs
 // This ensures consistency with the existing codebase
 const REFERENCE_MAPPING: Record<string, string> = {
@@ -749,8 +753,98 @@ const REFERENCE_MAPPING: Record<string, string> = {
   "zsh": "Zsh",
 };
 
+/**
+ * Convert a string to PascalCase following our naming conventions
+ */
+function toPascalCase(name: string): string {
+  // Handle special cases that differ from standard conversion
+  const specialCases: Record<string, string> = {
+    "c#": "CSharp",
+    "c++": "Cpp",
+    "f#": "FSharp",
+    "8th": "Eighth",
+    "objective-c": "ObjC",
+    "objective-c++": "ObjCpp",
+    "f*": "Fstar",
+    "m": "Mma",
+    "wolfram language": "Mma",
+    "standard ml": "Sml",
+    "supercollider": "Supercollider",
+    "star": "Starlark",
+    "sqlpl": "Plsql",
+    "euphoria": "Euphoria3",
+    "cairo zero": "Cairo",
+    "commonlisp": "Lisp",
+    "roff manpage": "Nroff",
+    "roff": "Nroff",
+    "gnuplot": "GnuPlot",
+    "java properties": "JProperties",
+    "vim script": "Vim",
+    "vim help file": "VimHelp",
+    "hosts file": "HostsAccess",
+    "tex": "Tex",
+    "plpgsql": "Plsql",
+    "tsql": "Sql",
+    "hiveql": "Sql",
+    "glimmer ts": "JavaScriptGlimmer",
+    "nushell": "Nu",
+    "ini": "ConfIni",
+    "stringtemplate": "Template",
+    "javascript.glimmer": "JavaScriptGlimmer",
+    "typescript.glimmer": "TypeScriptGlimmer",
+    "htmlangular": "Angular",
+    "tla": "Tla",
+    "ps1": "Ps1",
+  };
+
+  const lower = name.toLowerCase();
+  if (specialCases[lower]) {
+    return specialCases[lower];
+  }
+
+  // Default conversion: split on non-alphanumeric and capitalize each part
+  return name
+    .replace(/[-#]/g, "_")
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join("");
+}
+
+// Read the grammars.json and mapping (ground truth)
+const grammarsData = JSON.parse(await Bun.file(grammarsJsonPath).text());
+const grammarsMapping = JSON.parse(await Bun.file(grammarsMappingPath).text());
+
+console.log(`📦 Loaded ${grammarsData.grammars.length} grammars from grammars.json`);
+
+// Build a map: grammar name -> { variant, nvim_filetype }
+const grammarInfoMap: Record<string, { variant: string; nvimFiletype: string | null }> = {};
+for (const grammar of grammarsData.grammars) {
+  const mapping = grammarsMapping.find((m: any) => m.grammar === grammar.name);
+  if (mapping) {
+    // Use nvim filetype if available
+    const nvimFiletype = mapping.nvim_filetype || mapping.effective_filetype;
+    grammarInfoMap[grammar.name] = {
+      variant: toPascalCase(nvimFiletype),
+      nvimFiletype: nvimFiletype,
+    };
+  } else {
+    // No nvim mapping, use grammar name
+    grammarInfoMap[grammar.name] = {
+      variant: toPascalCase(grammar.name),
+      nvimFiletype: null,
+    };
+  }
+}
+
+console.log(`📋 Built info map for ${Object.keys(grammarInfoMap).length} grammars`);
+
 // Read the Neovim filetype.lua file
 const content = await Bun.file(neovimFile).text();
+
+// NOTE: We no longer parse nvim-treesitter parsers.lua here because:
+// 1. The regex-based parsing was buggy and caused corruption
+// 2. We now use grammarInfoMap from grammars.json + grammars-mapping.json as the ground truth
+// 3. The REFERENCE_MAPPING provides additional legacy mappings for compatibility
 
 // Extract sections using the -- BEGIN/-- END markers that exist in the file
 const extMatch = content.match(/-- BEGIN EXTENSION\n(.*)\n  -- END EXTENSION/s);
@@ -890,15 +984,35 @@ const MANUAL_PATTERDS: Array<[string, "static" | "dynamic", string, number?]> = 
 // Track all filetypes for the enum
 const filetypes = new Set<string>();
 
+const extEntries: Array<[string, string, string]> = [];
+const filenameEntries: Array<[string, string, string]> = [];
+
+// Track seen keys to avoid duplicates from the source data
+const seenExtensions = new Set<string>();
+const seenFilenames = new Set<string>();
+
 // Add manual override filetypes to ensure they're included in the enum
 for (const [key, [type, value]] of Object.entries(MANUAL_OVERRIDES)) {
   if (type === "static") {
     filetypes.add(value);
   }
+  // Track manual overrides to avoid duplicates from source data
+  seenExtensions.add(key);
 }
 
-const extEntries: Array<[string, string, string]> = [];
-const filenameEntries: Array<[string, string, string]> = [];
+// Add all grammars from grammars.json (ground truth)
+// This ensures all 348 grammars are included in the generated list.rs
+for (const [grammarName, info] of Object.entries(grammarInfoMap)) {
+  if (info.nvimFiletype) {
+    // Use the nvim filetype for consistency
+    filetypes.add(info.nvimFiletype);
+  } else {
+    // No nvim mapping, use grammar name
+    filetypes.add(grammarName);
+  }
+}
+
+console.log(`Added ${Object.keys(grammarInfoMap).length} grammars to filetypes set`);
 
 /**
  * Convert filetype name to Rust enum variant name (PascalCase)
@@ -908,6 +1022,13 @@ function toFtVariant(str: string): string {
   // First, check the reference mapping
   if (REFERENCE_MAPPING[str]) {
     return REFERENCE_MAPPING[str];
+  }
+
+  // Check if this is a grammar name with a known variant
+  for (const [grammarName, info] of Object.entries(grammarInfoMap)) {
+    if (str === grammarName || str === info.nvimFiletype) {
+      return info.variant;
+    }
   }
 
   // Fallback: simple PascalCase conversion for unknown filetypes
@@ -1054,9 +1175,6 @@ const STATIC_FALLBACK_EXTENSIONS: Record<string, string> = {
   "class": "stata",
   "dsp": "dsp",
   "f": "fortran",
-
-  // Local inline functions
-  "rc": "rc",
 };
 
 /**
@@ -1333,15 +1451,22 @@ for (const line of extContent.split(/\r?\n/)) {
   }
 
   if (key && rest) {
+    // Skip if we've already seen this extension (duplicate in source data)
+    if (seenExtensions.has(key)) {
+      continue;
+    }
+
     // Strip trailing comma
     rest = rest.replace(/,\s*$/, "");
     const [valueType, value1, value2] = parseValue(rest, key);
 
     if (valueType === "static" && value1) {
       extEntries.push([key, "static", value1]);
+      seenExtensions.add(key);
       filetypes.add(value1);
     } else if (valueType === "dynamic" && value1) {
       extEntries.push([key, "detect", value1]);
+      seenExtensions.add(key);
       // Add all possible return filetypes from this detect function
       if (detectReturns[value1]) {
         for (const ft of Object.keys(detectReturns[value1])) {
@@ -1354,11 +1479,14 @@ for (const line of extContent.split(/\r?\n/)) {
       }
     } else if (valueType === "closure" && value1) {
       extEntries.push([key, "closure", value1]);
+      seenExtensions.add(key);
     } else if (valueType === "starsetf_static" && value1) {
       extEntries.push([key, "starsetf_static", value1]);
+      seenExtensions.add(key);
       filetypes.add(value1);
     } else if (valueType === "starsetf_dynamic" && value1) {
       extEntries.push([key, "starsetf_detect", value1]);
+      seenExtensions.add(key);
       if (detectReturns[value1]) {
         for (const ft of Object.keys(detectReturns[value1])) {
           filetypes.add(ft);
@@ -1367,6 +1495,14 @@ for (const line of extContent.split(/\r?\n/)) {
     }
   }
 }
+
+// ============================================================================
+// Helix arrays (will be populated after all Neovim data is parsed)
+// ============================================================================
+const helixExtensions: Array<[string, string, string]> = [];
+const helixFilenames: Array<[string, string, string]> = [];
+const helixPathSuffixes: Array<[string, string, string]> = [];
+const helixPatterns: Array<[string, string, number?]> = [];
 
 // ============================================================================
 // Parse filename table
@@ -1427,11 +1563,18 @@ for (const line of filenameContent.split(/\r?\n/)) {
       }
     } else {
       // Plain filename entries go to filename
+      // Skip if we've already seen this filename (duplicate in source data)
+      if (seenFilenames.has(key)) {
+        continue;
+      }
+
       if (valueType === "static" && value1) {
         filenameEntries.push([key, "static", value1]);
+        seenFilenames.add(key);
         filetypes.add(value1);
       } else if (valueType === "dynamic" && value1) {
         filenameEntries.push([key, "detect", value1]);
+        seenFilenames.add(key);
         if (detectReturns[value1]) {
           for (const ft of Object.keys(detectReturns[value1])) {
             filetypes.add(ft);
@@ -1442,9 +1585,11 @@ for (const line of filenameContent.split(/\r?\n/)) {
         }
       } else if (valueType === "starsetf_static" && value1) {
         filenameEntries.push([key, "starsetf_static", value1]);
+        seenFilenames.add(key);
         filetypes.add(value1);
       } else if (valueType === "starsetf_dynamic" && value1) {
         filenameEntries.push([key, "starsetf_detect", value1]);
+        seenFilenames.add(key);
         if (detectReturns[value1]) {
           for (const ft of Object.keys(detectReturns[value1])) {
             filetypes.add(ft);
@@ -1452,6 +1597,7 @@ for (const line of filenameContent.split(/\r?\n/)) {
         }
       } else if (valueType === "closure" && value1) {
         filenameEntries.push([key, "closure", value1]);
+        seenFilenames.add(key);
       }
     }
   }
@@ -1497,6 +1643,73 @@ for (const line of patternContent.split(/\r?\n/)) {
     }
   }
 }
+
+// ============================================================================
+// Add Helix file-types (from Helix editor's languages.toml)
+// ============================================================================
+// Build sets of existing entries for deduplication
+const existingExtensions = new Set<string>();
+// Add MANUAL_OVERRIDES to existingExtensions
+for (const key of Object.keys(MANUAL_OVERRIDES)) {
+  existingExtensions.add(key);
+}
+// Add entries from parsed source data
+for (const [ext, , ] of extEntries) {
+  existingExtensions.add(ext);
+}
+const existingFilenames = new Set<string>();
+for (const [filename, , ] of filenameEntries) {
+  existingFilenames.add(filename);
+}
+const existingPathSuffixes = new Set<string>();
+for (const [suffix, , ] of pathSuffixEntries) {
+  existingPathSuffixes.add(suffix);
+}
+
+// Process Helix data (except patterns - those will be added after pattern parsing)
+for (const mapping of grammarsMapping) {
+  if (!mapping.helix_file_types) continue;
+
+  // Get the effective filetype to use for variant lookup
+  const effectiveFiletype = mapping.effective_filetype || mapping.grammar;
+  const variant = toFtVariant(effectiveFiletype);
+
+  for (const fileType of mapping.helix_file_types) {
+    if (typeof fileType === "string") {
+      // Simple string -> file extension (no leading dot)
+      if (!existingExtensions.has(fileType)) {
+        helixExtensions.push([fileType, "static", variant]);
+        existingExtensions.add(fileType);
+      }
+    } else if (fileType.glob && typeof fileType.glob === "string") {
+      const glob = fileType.glob;
+      // Determine the type based on the glob pattern
+      if (glob.includes("/")) {
+        // Contains / -> path suffix (e.g., "i3/config")
+        if (!existingPathSuffixes.has(glob)) {
+          helixPathSuffixes.push([glob, "static", variant]);
+          existingPathSuffixes.add(glob);
+        }
+      } else if (glob.includes("*")) {
+        // Contains wildcard -> pattern (e.g., "*SConstruct", "bash_completion.d/*")
+        // Convert to regex pattern - these will be added after pattern parsing
+        const regexPattern = "^" + glob.replace(/\*/g, ".*") + "$";
+        helixPatterns.push([regexPattern, "static", variant]);
+      } else {
+        // No / or * -> filename (e.g., ".bashrc", "APKBUILD")
+        if (!existingFilenames.has(glob)) {
+          helixFilenames.push([glob, "static", variant]);
+          existingFilenames.add(glob);
+        }
+      }
+    }
+  }
+}
+
+console.log(`Adding ${helixExtensions.length} Helix file extensions`);
+console.log(`Adding ${helixFilenames.length} Helix filenames`);
+console.log(`Adding ${helixPathSuffixes.length} Helix path suffixes`);
+console.log(`Adding ${helixPatterns.length} Helix patterns (will be added after pattern parsing)`);
 
 // ============================================================================
 // Add all filetypes from detectReturns to ensure all detect function return types are included
@@ -1645,6 +1858,10 @@ ${Object.entries(MANUAL_OVERRIDES)
   .map(([key, , value]) => {
     return `    "${key}" => FileTypeResolver::Dynamic(${value}),\n`;
   })
+  .join("")}${helixExtensions
+  .map(([key, , value]) => {
+    return `    "${key}" => FileTypeResolver::Static(FileType::${value}),\n`;
+  })
   .join("")}};
 `;
 
@@ -1676,6 +1893,10 @@ ${filenameEntries
   .map(([key, , value]) => {
     return `    "${key}" => FileTypeResolver::Dynamic(${value}),\n`;
   })
+  .join("")}${helixFilenames
+  .map(([key, , value]) => {
+    return `    "${key}" => FileTypeResolver::Static(FileType::${value}),\n`;
+  })
   .join("")}};
 `;
 
@@ -1701,6 +1922,10 @@ ${pathSuffixEntries
       return `    ("${key}", FileTypeResolver::Dynamic(${value})),\n`;
     }
     return "";
+  })
+  .join("")}${helixPathSuffixes
+  .map(([key, , value]) => {
+    return `    ("${key}", FileTypeResolver::Static(FileType::${value})),\n`;
   })
   .join("")}];
 `;
@@ -1772,6 +1997,22 @@ for (const [rustPattern, type, value, priority] of MANUAL_PATTERDS) {
   }
 }
 
+// Add Helix patterns (from glob patterns with wildcards)
+// First, build a set of existing patterns for deduplication
+const existingPatterns = new Set<string>();
+for (const line of patternLines) {
+  const match = line.match(/regex!\(r"([^"]+)"\)/);
+  if (match) {
+    existingPatterns.add(match[1]);
+  }
+}
+// Now add only Helix patterns that don't already exist
+for (const [regexPattern, , variant] of helixPatterns) {
+  if (!existingPatterns.has(regexPattern)) {
+    patternLines.push(`        (false, regex!(r"${regexPattern}").deref(), Pattern::new(FileTypeResolver::Static(FileType::${variant}), None)),\n`);
+  }
+}
+
 const patternRsContent = `use std::ops::Deref;
 
 use lazy_regex::regex;
@@ -1820,10 +2061,10 @@ console.error("  src/detect/path_suffix.rs");
 console.error("  src/detect/pattern.rs");
 console.error("\n📊 Stats:");
 console.error(`  Total filetypes:  ${filetypeList.length}`);
-console.error(`  Extensions: ${extEntries.length}`);
-console.error(`  Filenames:  ${filenameEntries.length}`);
-console.error(`  Path suffixes: ${pathSuffixEntries.length}`);
-console.error(`  Patterns included: ${patternLines.length}`);
+console.error(`  Extensions: ${extEntries.length} (Neovim) + ${helixExtensions.length} (Helix) = ${extEntries.length + helixExtensions.length} total`);
+console.error(`  Filenames:  ${filenameEntries.length} (Neovim) + ${helixFilenames.length} (Helix) = ${filenameEntries.length + helixFilenames.length} total`);
+console.error(`  Path suffixes: ${pathSuffixEntries.length} (Neovim) + ${helixPathSuffixes.length} (Helix) = ${pathSuffixEntries.length + helixPathSuffixes.length} total`);
+console.error(`  Patterns: ${patternLines.length} (Neovim) + ${helixPatterns.length} (Helix) = ${patternLines.length + helixPatterns.length} total`);
 
 // Count dynamic entries
 const extDynamic = extEntries.filter(([, t]) => t === "detect").length;
