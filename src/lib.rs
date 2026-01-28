@@ -60,6 +60,18 @@ mod tests {
     }
 
     #[test]
+    fn ts_extension_prefers_typescript() {
+        let typescript = "export const x: number = 1;\nconsole.log(x)\n";
+        assert_eq!(FileType::TypeScript, detect(Path::new("main.ts"), typescript));
+    }
+
+    #[test]
+    fn ts_extension_detects_qt_ts_as_xml() {
+        let qt_ts = "<TS version=\"2.1\" language=\"en_US\"></TS>\n";
+        assert_eq!(FileType::Xml, detect(Path::new("app.ts"), qt_ts));
+    }
+
+    #[test]
     fn test_variants_parse() {
         use std::str::FromStr;
         // Test various variants to find which ones fail

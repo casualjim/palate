@@ -1247,10 +1247,22 @@ fn tmp(path: &Path, content: &str) -> Option<FileType> {
 }
 
 fn ts(_path: &Path, content: &str) -> Option<FileType> {
-    match regex_is_match!(r"<\?\s*xml", get_lines(content, 1)) {
-        true => Some(FileType::Xml),
-        false => Some(FileType::Smil),
+    // `.ts` is ambiguous:
+    // - TypeScript source code (most common)
+    // - Qt Linguist translation sources (`.ts` XML, typically `<TS ...>`)
+    //
+    // Prefer TypeScript unless the file clearly looks like XML/SMIL.
+    let first = util::next_non_blank(content, 0).unwrap_or("");
+
+    if regex_is_match!(r"^\s*<\?\s*xml\b", first) || regex_is_match!(r"^\s*<\s*TS\b", first) {
+        return Some(FileType::Xml);
     }
+
+    if regex_is_match!(r"^\s*<\s*smil\b"i, first) {
+        return Some(FileType::Smil);
+    }
+
+    Some(FileType::TypeScript)
 }
 
 fn ttl(_path: &Path, content: &str) -> Option<FileType> {

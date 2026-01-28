@@ -1,40 +1,22 @@
-use clap::{Arg, ArgAction, Command};
-use regex::Regex;
+use clap::{Arg, Command};
 use std::{
     collections::HashMap,
     fs::File,
-    io::{self, Read, Write},
+    io::{self, BufRead, Read, Write},
     path::{Path, PathBuf},
 };
 use ignore::WalkBuilder;
-use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 
 use palate::{FileType, is_text_file, try_detect};
 
 const MAX_CONTENT_SIZE_BYTES: usize = 51_200;
 
-struct CLIOptions {
-    color: bool,
-    condensed_output: bool,
-    filters: Option<Vec<Regex>>,
-}
-
-impl CLIOptions {
-    fn matches_filter(&self, pattern: &str) -> bool {
-        if let Some(filters) = &self.filters {
-            filters.iter().any(|filter| filter.is_match(pattern))
-        } else {
-            true
-        }
-    }
-
-    fn color_option(&self) -> ColorChoice {
-        if self.color {
-            ColorChoice::Auto
-        } else {
-            ColorChoice::Never
-        }
-    }
+#[derive(Default)]
+struct LanguageStats {
+    files: usize,
+    lines: u64,
+    blanks: u64,
+    paths: Vec<PathBuf>,
 }
 
 fn main() {
@@ -44,37 +26,16 @@ fn main() {
         .map(String::as_str)
         .unwrap_or(".");
     let root = Path::new(path);
-    let root_is_dir = root.is_dir();
 
-    let mut breakdown = get_language_breakdown(root);
-    let mut language_count: Vec<(FileType, Vec<PathBuf>)> = breakdown.drain().collect();
-    language_count.sort_by(|(_, a), (_, b)| b.len().cmp(&a.len()));
-    for (_, files) in language_count.iter_mut() {
-        files.sort();
+    let mut stats = scan_language_stats(root, false, true);
+    let mut language_stats: Vec<(FileType, LanguageStats)> = stats.drain().collect();
+    language_stats.sort_by(|(_, a), (_, b)| b.files.cmp(&a.files));
+    for (_, data) in language_stats.iter_mut() {
+        data.paths.sort();
     }
 
-    if let Err(_) = print_language_split(&language_count) {
+    if let Err(_) = print_tokei_lite(&language_stats) {
         std::process::exit(1);
-    }
-
-    let cli_options = CLIOptions {
-        color: !matches.get_flag("no-color"),
-        condensed_output: matches.get_flag("condensed"),
-        filters: matches.get_many::<String>("filter").map(|filters| {
-            filters
-                .map(|f| Regex::new(f).unwrap_or_else(|_| {
-                    eprintln!("Invalid filter: {}", f);
-                    std::process::exit(1);
-                }))
-                .collect()
-        }),
-    };
-
-    if matches.get_flag("file-breakdown") {
-        writeln!(io::stdout(), "").unwrap_or_else(|_| std::process::exit(1));
-        if let Err(_) = print_file_breakdown(&language_count, &cli_options, root, root_is_dir) {
-            std::process::exit(1);
-        }
     }
 }
 
@@ -83,43 +44,28 @@ fn get_cli() -> Command {
         .version(env!("CARGO_PKG_VERSION"))
         .about("Palate is a file type detector. It supports detecting the file type of a file or the file type makeup of a directory.")
         .arg(Arg::new("PATH").index(1).default_value("."))
-        .arg(
-            Arg::new("file-breakdown")
-                .short('b')
-                .long("breakdown")
-                .help("prints the file type detected for each file visited")
-                .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("condensed")
-                .short('c')
-                .long("condensed")
-                .help("condenses the output for the breakdowns to only show the headers")
-                .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("filter")
-                .short('f')
-                .long("filter")
-                .help("a regex that is used to filter which sections get printed for the file and strategy breakdowns")
-                .num_args(1)
-                .action(ArgAction::Append),
-        )
-        .arg(
-            Arg::new("no-color")
-                .short('n')
-                .long("no-color")
-                .help("don't color code the output (useful when piping)")
-                .action(ArgAction::SetTrue),
-        )
 }
 
-fn get_language_breakdown(root: &Path) -> HashMap<FileType, Vec<PathBuf>> {
-    let mut breakdown: HashMap<FileType, Vec<PathBuf>> = HashMap::new();
+fn scan_language_stats(
+    root: &Path,
+    store_paths: bool,
+    count_lines: bool,
+) -> HashMap<FileType, LanguageStats> {
+    let mut breakdown: HashMap<FileType, LanguageStats> = HashMap::new();
 
     if root.is_file() {
         if let Some(file_type) = detect_path(root) {
-            breakdown.entry(file_type).or_default().push(root.to_path_buf());
+            let entry = breakdown.entry(file_type).or_default();
+            entry.files += 1;
+            if store_paths {
+                entry.paths.push(root.to_path_buf());
+            }
+            if count_lines {
+                if let Ok((lines, blanks)) = count_lines_and_blanks(root) {
+                    entry.lines += lines;
+                    entry.blanks += blanks;
+                }
+            }
         }
         return breakdown;
     }
@@ -135,10 +81,17 @@ fn get_language_breakdown(root: &Path) -> HashMap<FileType, Vec<PathBuf>> {
         }
         let path = entry.path();
         if let Some(file_type) = detect_path(path) {
-            breakdown
-                .entry(file_type)
-                .or_default()
-                .push(path.to_path_buf());
+            let entry = breakdown.entry(file_type).or_default();
+            entry.files += 1;
+            if store_paths {
+                entry.paths.push(path.to_path_buf());
+            }
+            if count_lines {
+                if let Ok((lines, blanks)) = count_lines_and_blanks(path) {
+                    entry.lines += lines;
+                    entry.blanks += blanks;
+                }
+            }
         }
     }
 
@@ -163,50 +116,91 @@ fn read_file_content(path: &Path) -> String {
     String::from_utf8_lossy(&buffer).into_owned()
 }
 
-fn print_language_split(language_counts: &Vec<(FileType, Vec<PathBuf>)>) -> Result<(), io::Error> {
-    let total = language_counts
-        .iter()
-        .fold(0usize, |acc, (_, files)| acc + files.len()) as f64;
-    if total == 0.0 {
-        return Ok(());
+fn print_tokei_lite(language_stats: &Vec<(FileType, LanguageStats)>) -> Result<(), io::Error> {
+    let mut rows: Vec<(&'static str, usize, u64, u64)> = Vec::new(); // (lang, files, lines, blanks)
+    let mut total_files = 0usize;
+    let mut total_lines = 0u64;
+    let mut total_blanks = 0u64;
+
+    for (language, stats) in language_stats.iter() {
+        let name = file_type_name(*language);
+        rows.push((name, stats.files, stats.lines, stats.blanks));
+        total_files += stats.files;
+        total_lines += stats.lines;
+        total_blanks += stats.blanks;
     }
 
-    for (language, files) in language_counts.iter() {
-        let percentage = ((files.len() * 100) as f64) / total;
-        writeln!(io::stdout(), "{:.2}% {}", percentage, file_type_name(*language))?;
+    rows.sort_by(|a, b| b.2.cmp(&a.2)); // by lines desc
+
+    let header = ("Language", "Files", "Lines", "Code", "Blanks");
+    let mut w_lang = header.0.len();
+    let mut w_files = header.1.len();
+    let mut w_lines = header.2.len();
+    let mut w_code = header.3.len();
+    let mut w_blanks = header.4.len();
+
+    for (lang, files, lines, blanks) in rows.iter() {
+        w_lang = w_lang.max(lang.len());
+        w_files = w_files.max(files.to_string().len());
+        w_lines = w_lines.max(lines.to_string().len());
+        w_code = w_code.max((lines.saturating_sub(*blanks)).to_string().len());
+        w_blanks = w_blanks.max(blanks.to_string().len());
     }
 
-    Ok(())
-}
+    let total_code = total_lines.saturating_sub(total_blanks);
+    w_files = w_files.max(total_files.to_string().len());
+    w_lines = w_lines.max(total_lines.to_string().len());
+    w_code = w_code.max(total_code.to_string().len());
+    w_blanks = w_blanks.max(total_blanks.to_string().len());
 
-fn print_file_breakdown(
-    language_counts: &Vec<(FileType, Vec<PathBuf>)>,
-    options: &CLIOptions,
-    root: &Path,
-    root_is_dir: bool,
-) -> Result<(), io::Error> {
-    let mut stdout = StandardStream::stdout(options.color_option());
-    let mut title_color = ColorSpec::new();
-    title_color.set_fg(Some(Color::Magenta));
-    let default_color = ColorSpec::new();
+    writeln!(
+        io::stdout(),
+        "{:<w_lang$} {:>w_files$} {:>w_lines$} {:>w_code$} {:>w_blanks$}",
+        header.0,
+        header.1,
+        header.2,
+        header.3,
+        header.4,
+        w_lang = w_lang,
+        w_files = w_files,
+        w_lines = w_lines,
+        w_code = w_code,
+        w_blanks = w_blanks
+    )?;
 
-    for (language, breakdowns) in language_counts.iter() {
-        let language_name = file_type_name(*language);
-        if options.matches_filter(language_name) {
-            stdout.set_color(&title_color)?;
-            write!(stdout, "{}", language_name)?;
-
-            stdout.set_color(&default_color)?;
-            writeln!(stdout, " ({})", breakdowns.len())?;
-            if !options.condensed_output {
-                for file in breakdowns.iter() {
-                    let path = display_path(root, root_is_dir, file);
-                    writeln!(stdout, "{}", path.display())?;
-                }
-                writeln!(stdout, "")?;
-            }
-        }
+    for (lang, files, lines, blanks) in rows {
+        let code = lines.saturating_sub(blanks);
+        writeln!(
+            io::stdout(),
+            "{:<w_lang$} {:>w_files$} {:>w_lines$} {:>w_code$} {:>w_blanks$}",
+            lang,
+            files,
+            lines,
+            code,
+            blanks,
+            w_lang = w_lang,
+            w_files = w_files,
+            w_lines = w_lines,
+            w_code = w_code,
+            w_blanks = w_blanks
+        )?;
     }
+
+    writeln!(
+        io::stdout(),
+        "{:<w_lang$} {:>w_files$} {:>w_lines$} {:>w_code$} {:>w_blanks$}",
+        "Total",
+        total_files,
+        total_lines,
+        total_code,
+        total_blanks,
+        w_lang = w_lang,
+        w_files = w_files,
+        w_lines = w_lines,
+        w_code = w_code,
+        w_blanks = w_blanks
+    )?;
+
     Ok(())
 }
 
@@ -214,14 +208,25 @@ fn file_type_name(file_type: FileType) -> &'static str {
     file_type.into()
 }
 
-fn display_path<'a>(root: &Path, root_is_dir: bool, path: &'a Path) -> &'a Path {
-    if root_is_dir {
-        if let Ok(stripped) = path.strip_prefix(root) {
-            return stripped;
+fn count_lines_and_blanks(path: &Path) -> io::Result<(u64, u64)> {
+    let file = File::open(path)?;
+    let mut reader = io::BufReader::new(file);
+    let mut buf = Vec::new();
+
+    let mut lines = 0u64;
+    let mut blanks = 0u64;
+
+    loop {
+        buf.clear();
+        let n = reader.read_until(b'\n', &mut buf)?;
+        if n == 0 {
+            break;
+        }
+        lines += 1;
+        if buf.iter().all(|b| b.is_ascii_whitespace()) {
+            blanks += 1;
         }
     }
-    if let Ok(stripped) = path.strip_prefix(".") {
-        return stripped;
-    }
-    path
+
+    Ok((lines, blanks))
 }
