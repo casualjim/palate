@@ -66,7 +66,7 @@ strum_macros = "0.27"
 tokio = { version = "1", features = ["fs", "io-util", "rt"], optional = true }
 
 [dependencies.palate_polyglot_tokenizer]
-path = "../hyperpolyglot/crates/palate_polyglot_tokenizer"
+path = "crates/palate_polyglot_tokenizer"
 optional = true
 
 [dev-dependencies]
