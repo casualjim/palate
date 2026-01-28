@@ -5,6 +5,8 @@
  * and generates Rust files in the base_dir
  */
 
+import { TFT_ONLY_PATTERNS } from "./tft-only-patterns";
+
 
 const neovimFile = "/home/ivan/github/neovim/neovim/runtime/lua/vim/filetype.lua";
 const neovimDetectFile = "/home/ivan/github/neovim/neovim/runtime/lua/vim/filetype/detect.lua";
@@ -308,6 +310,8 @@ const REFERENCE_MAPPING: Record<string, string> = {
   "java": "Java",
   "javacc": "JavaCc",
   "javascript": "JavaScript",
+  // Neovim uses "javascriptreact" for JSX filetype; canonicalize to "jsx" (Jsx variant).
+  "javascriptreact": "Jsx",
   "javascript.glimmer": "JavaScriptGlimmer",
   "jess": "Jess",
   "jgraph": "JGraph",
@@ -828,6 +832,10 @@ type ParseOverrides = {
   customClosureByKey: Record<string, string>;
   inlineFunctionDetectByKey: Record<string, string>;
   staticFallbackByKey: Record<string, string>;
+  // Per-key remapping for literal string filetypes like `mli = 'ocaml'`.
+  // This is intentionally tiny and only used where we want to be *more specific*
+  // than Neovim's table without turning the whole generator into an overrides zoo.
+  staticValueOverrideByKey: Record<string, Record<string, string>>;
 };
 
 function buildGrammarInfo(
@@ -1011,17 +1019,21 @@ const MANUAL_OVERRIDES: Record<string, ["static" | "dynamic", string]> = {
   "vh": ["static", "Verilog"],
   "vlg": ["static", "Verilog"],
   "zir": ["static", "Zir"],
-  "ini": ["static", "ConfIni"],
 };
 
 /**
- * Manual filename overrides from the reference implementation
- * Format: "filename": ["static", "filetype"]
+ * Manual filename overrides from the reference implementation.
+ *
+ * These are entries that exist in tft but are not present in Neovim's filetype.lua
+ * filename table (or need a different resolver type).
+ *
+ * Format: "filename": ["static"|"detect"|"closure", filetype_or_expr]
  */
-const MANUAL_FILENAME_OVERRIDES: Record<string, ["static", string]> = {
+const MANUAL_FILENAME_OVERRIDES: Record<string, ["static" | "detect" | "closure", string]> = {
   ".gnuplot": ["static", "gnuplot"],
   "config.nu": ["static", "nu"],
   "env.nu": ["static", "nu"],
+  ".env": ["closure", "|_, content| detect::sh(content, None)"],
   "printcap": ["static", "ptcap-print"],
   "termcap": ["static", "ptcap-term"],
   "xorg.conf": ["static", "xf86conf-4"],
@@ -1029,16 +1041,47 @@ const MANUAL_FILENAME_OVERRIDES: Record<string, ["static", string]> = {
 };
 
 /**
- * Manual pattern overrides from the reference implementation
- * Format: [rust_pattern, "static"|"dynamic", variant_or_function, priority?]
- * priority: -1 for negative (starsetf), undefined/0 for normal
- * NOTE: These are already in Rust regex format, not Lua pattern format
+ * Manual path suffix overrides from the reference implementation.
+ *
+ * These are entries that exist in tft but are not present in Neovim's filetype.lua
+ * path table. They are location-based (so low ambiguity) and match the same
+ * resulting filetype we would return for the corresponding filename anyway.
  */
-const MANUAL_PATTERNS: Array<[string, "static" | "dynamic", string, number?]> = [
+const MANUAL_PATH_SUFFIX_OVERRIDES: Record<string, ["static", string]> = {
+  "etc/pacman.conf": ["static", "confini"],
+  "etc/zsh/zprofile": ["static", "zsh"],
+};
+
+/**
+ * Manual pattern overrides from the reference implementation.
+ *
+ * Format: [rust_pattern, "static"|"dynamic"|"closure", variant_or_function, priority?, match_full_path?]
+ * - `variant_or_function`:
+ *   - static: Rust enum variant name (e.g. "Apache", "XDefaults")
+ *   - dynamic: detect function name (e.g. "dep3patch")
+ *   - closure: full Rust closure expression (e.g. "|_, content| detect::sh(content, None)")
+ * - priority:
+ *   - "starsetf" to generate Pattern::starsetf(..., None)
+ *   - number to generate Pattern::new(..., Some(number)) (negative numbers force post-extension phase)
+ *   - undefined to generate Pattern::new(..., None)
+ * - match_full_path: overrides haystack selection; if omitted we use a best-effort heuristic.
+ *
+ * NOTE: `rust_pattern` values are already Rust regex format, not Lua pattern format.
+ */
+export type ManualPatternEntry = [
+  string,
+  "static" | "dynamic" | "closure",
+  string,
+  ("starsetf" | number)?,
+  boolean?,
+];
+
+const MANUAL_PATTERNS: ManualPatternEntry[] = [
   // Patterns from reference that aren't in current Neovim
-  ["^.*\\.git/.*$", "dynamic", "git", -1],
-  ["^.*\\.[Ll][Oo][Gg]$", "dynamic", "log"],
-  ["^.+~$", "dynamic", "tmp"],
+  ["^.*\\.git/.*$", "dynamic", "git", -1, true],
+  ["^.*\\.[Ll][Oo][Gg]$", "dynamic", "log", undefined, true],
+  ["^.+~$", "dynamic", "tmp", undefined, false],
+  ...TFT_ONLY_PATTERNS,
 ];
 
 // Track all filetypes for the enum.
@@ -1110,10 +1153,9 @@ function toFtVariant(str: string): string {
 function luaToRustPattern(pattern: string): string {
   let result = "";
 
-  // Handle leading / - in Neovim patterns this means full path match,
-  // but reference converts it to ^.* to match anywhere in path
+  // Handle leading / - in Neovim patterns this means full path match.
+  // We strip it here; callers decide whether to anchor with ^.*.
   if (pattern.startsWith("/")) {
-    result = "^.*";
     pattern = pattern.slice(1);
   }
 
@@ -1175,7 +1217,9 @@ function luaToRustPattern(pattern: string): string {
       // Note: $ and ^ are anchors, don't escape them
       // . in Lua is "any character", same as Rust, so don't escape
       // * in Lua (when not after a char) is literal *, need to escape
-      const rustMagic = ["(", ")", "[", "]", "{", "}", "|", "+", "?", "*"];
+      // IMPORTANT: Lua `[...]` is a character class; keep `[` and `]` unescaped so it stays a regex class.
+      // Literal brackets should be written as `%[` / `%]` in Lua, which we translate to `\[` / `\]` above.
+      const rustMagic = ["(", ")", "{", "}", "|", "+", "?", "*"];
       if (rustMagic.includes(char)) {
         result += "\\" + char;
       } else {
@@ -1186,6 +1230,15 @@ function luaToRustPattern(pattern: string): string {
   }
 
   return result;
+}
+
+function finalizeRustPatternForNvimMatch(rustPattern: string): string {
+  // tft-style: treat patterns as matching anywhere in the chosen haystack.
+  // If the pattern already has a start anchor (`^`), keep it.
+  if (rustPattern.startsWith("^")) {
+    return rustPattern;
+  }
+  return `^.*${rustPattern}`;
 }
 
 /**
@@ -1210,8 +1263,8 @@ const STATIC_FALLBACK_BY_KEY: Record<string, string> = {
   "rc": "rc",  // detect_rc is a local inline function
   "rch": "rc", // detect_rc is a local inline function
 
-  // detect.vba returns 'vim' or 'vb' - use 'vb' as fallback
-  "vba": "vb",
+  // detect.vba returns 'vim' or 'vb' - use 'vim' as fallback (matching reference)
+  "vba": "vim",
   // detect.def returns various things - use 'def' as fallback
   "def": "def",
 
@@ -1228,15 +1281,15 @@ const STATIC_FALLBACK_BY_KEY: Record<string, string> = {
   "mdwn": "markdown",
   "mkdn": "markdown",
   "mkd": "markdown",
-  "mk": "markdown",
+  "mk": "make",
   // mp* extensions all resolve to MpMetafun - use static (matching reference)
-  "mpiv": "mpmetafun",
-  "mpvi": "mpmetafun",
-  "mpxl": "mpmetafun",
+  "mpiv": "mp-metafun",
+  "mpvi": "mp-metafun",
+  "mpxl": "mp-metafun",
 
   // Detect functions that don't exist in Rust yet
   "class": "stata",
-  "dsp": "dsp",
+  "dsp": "make",
   "f": "fortran",
 };
 
@@ -1248,6 +1301,12 @@ const CUSTOM_CLOSURE_BY_KEY: Record<string, string> = {
   // bindzone has signature: fn(content: &str, default: Option<FileType>) -> Option<FileType>
   "com": '|_, content| detect::bindzone(content, Some(FileType::Dcl))',
   "db": '|_, content| detect::bindzone(content, None)',
+
+  // Disambiguate ambiguous extensions using content sniffing.
+  // Neovim maps these to a single filetype, but the extensions are overloaded in the wild.
+  // We prefer correctness via cheap content checks over hardcoding a single winner.
+  "comp": "detect::comp",
+  "lib": "detect::lib",
 
   // decl has fallback to Clean
   "dcl": '|path, content| detect::decl(path, content).or(Some(FileType::Clean))',
@@ -1277,6 +1336,15 @@ const PARSE_OVERRIDES: ParseOverrides = {
   customClosureByKey: CUSTOM_CLOSURE_BY_KEY,
   inlineFunctionDetectByKey: INLINE_FUNCTION_DETECT_BY_KEY,
   staticFallbackByKey: STATIC_FALLBACK_BY_KEY,
+  staticValueOverrideByKey: {
+    // Neovim sometimes uses broader filetypes for specific extensions. We keep a
+    // very small set of "more specific" refinements here (and ONLY here) so we
+    // can regenerate consistently without manual edits to generated Rust files.
+    "mli": { "ocaml": "ocamlinterface" },
+    "wast": { "wat": "wast" },
+    "at": { "config": "m4" },
+    "mom": { "groff": "nroff" },
+  },
 };
 
 /**
@@ -1393,7 +1461,9 @@ function parseValue(value: string, key: string, overrides: ParseOverrides): Pars
   // Extract string value from quotes: '8th' or "8th"
   const strValue = value.match(/['"]([^'"]+)['"]/);
   if (strValue) {
-    return { kind: "static", filetype: strValue[1] };
+    const raw = strValue[1];
+    const overridden = overrides.staticValueOverrideByKey[key]?.[raw];
+    return { kind: "static", filetype: overridden ?? raw };
   }
 
   return { kind: "unknown" };
@@ -1613,7 +1683,10 @@ for (const line of extContent.split(/\r?\n/)) {
 const helixExtensions: Array<[string, string, string]> = [];
 const helixFilenames: Array<[string, string, string]> = [];
 const helixPathSuffixes: Array<[string, string, string]> = [];
-const helixPatterns: Array<[string, string, number?]> = [];
+// Helix "file-types" globs can include path separators and wildcard/meta syntax.
+// Wildcards are NOT compatible with our PATH_SUFFIX detector (Path::ends_with),
+// so any glob-like entry must become a PATTERN instead.
+const helixPatterns: Array<[string, string, string, boolean]> = [];
 
 // ============================================================================
 // Parse filename table
@@ -1690,13 +1763,34 @@ for (const line of filenameContent.split(/\r?\n/)) {
 }
 
 // Add manual filename overrides from reference (override existing entries if present)
-for (const [key, [, filetype]] of Object.entries(MANUAL_FILENAME_OVERRIDES)) {
+for (const [key, [kind, value]] of Object.entries(MANUAL_FILENAME_OVERRIDES)) {
   const existingIndex = filenameEntries.findIndex(([k]) => k === key);
   if (existingIndex >= 0) {
-    filenameEntries[existingIndex] = [key, "static", filetype];
+    filenameEntries[existingIndex] = [key, kind, value];
+  } else {
+    let parsed: ParsedValue;
+    if (kind === "static") {
+      parsed = { kind: "static", filetype: value };
+    } else if (kind === "detect") {
+      parsed = { kind: "detect", functionName: value };
+    } else {
+      parsed = { kind: "closure", expr: value };
+    }
+    recordEntry(filenameEntries, key, parsed, { seen: seenFilenames, filetypes });
+  }
+  if (kind === "static") {
+    filetypes.add(value);
+  }
+}
+
+// Add manual path suffix overrides from reference (override existing entries if present)
+for (const [key, [, filetype]] of Object.entries(MANUAL_PATH_SUFFIX_OVERRIDES)) {
+  const existingIndex = pathSuffixEntries.findIndex(([k]) => k === key);
+  if (existingIndex >= 0) {
+    pathSuffixEntries[existingIndex] = [key, "static", filetype];
   } else {
     const parsed: ParsedValue = { kind: "static", filetype };
-    recordEntry(filenameEntries, key, parsed, { seen: seenFilenames, filetypes });
+    recordEntry(pathSuffixEntries, key, parsed, { filetypes });
   }
   filetypes.add(filetype);
 }
@@ -1704,7 +1798,7 @@ for (const [key, [, filetype]] of Object.entries(MANUAL_FILENAME_OVERRIDES)) {
 // ============================================================================
 // First pass: parse pattern table to collect all filetypes
 // ============================================================================
-console.error("Parsing pattern table for additional filetypes...");
+console.log("Parsing pattern table for additional filetypes...");
 for (const line of patternContent.split(/\r?\n/)) {
   const trimmed = line.trim();
   if (trimmed === "" || trimmed.startsWith("--") || trimmed === "}") continue;
@@ -1744,6 +1838,79 @@ for (const [suffix, , ] of pathSuffixEntries) {
   existingPathSuffixes.add(suffix);
 }
 
+function escapeRegexLiteral(s: string): string {
+  // Escape regex metacharacters. Note: '/' is not special in Rust regex.
+  return s.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
+}
+
+function helixGlobToRustRegex(glob: string, matchFullPath: boolean): string {
+  // Convert a Helix glob to a Rust regex source string (without surrounding /.../).
+  // This is intentionally minimal: it supports `*`, `**`, `?`, and simple `{a,b}` alternation.
+  //
+  // Important: if matchFullPath=true we later match against the full path string, so `*` should
+  // not cross path separators. For filename-only matching, we can treat `*` as `.*`.
+
+  function convert(input: string): string {
+    let out = "";
+    for (let i = 0; i < input.length; i++) {
+      const ch = input[i];
+
+      // `**` -> `.*`
+      if (ch === "*" && input[i + 1] === "*") {
+        out += ".*";
+        i += 1;
+        continue;
+      }
+
+      if (ch === "*") {
+        out += matchFullPath ? "[^/]*" : ".*";
+        continue;
+      }
+
+      if (ch === "?") {
+        out += matchFullPath ? "[^/]" : ".";
+        continue;
+      }
+
+      // Simple brace alternation: `{a,b}` -> `(?:a|b)`
+      if (ch === "{") {
+        const end = input.indexOf("}", i + 1);
+        if (end !== -1) {
+          const body = input.slice(i + 1, end);
+          const opts = body.split(",").map((s) => s.trim()).filter(Boolean);
+          if (opts.length > 0) {
+            out += `(?:${opts.map(escapeRegexLiteral).join("|")})`;
+            i = end;
+            continue;
+          }
+        }
+        // Fall back to treating `{` as a literal.
+        out += "\\{";
+        continue;
+      }
+
+      // Treat `}` as literal if we see it without a matching `{`.
+      if (ch === "}") {
+        out += "\\}";
+        continue;
+      }
+
+      // Keep path separators literal.
+      if (ch === "/") {
+        out += "/";
+        continue;
+      }
+
+      out += escapeRegexLiteral(ch);
+    }
+    return out;
+  }
+
+  const body = convert(glob);
+  const prefix = matchFullPath ? "^.*" : "^";
+  return `${prefix}${body}$`;
+}
+
 // Process Helix data (except patterns - those will be added after pattern parsing)
 for (const mapping of grammarsMapping) {
   if (!mapping.helix_file_types) continue;
@@ -1754,27 +1921,41 @@ for (const mapping of grammarsMapping) {
 
   for (const fileType of mapping.helix_file_types) {
     if (typeof fileType === "string") {
-      // Simple string -> file extension (no leading dot)
-      if (!existingExtensions.has(fileType)) {
-        helixExtensions.push([fileType, "static", variant]);
-        existingExtensions.add(fileType);
+      // Helix uses plain strings for both extensions and (dot)filenames.
+      // Many dotfiles like `.zprofile` have an "extension" of `zprofile` in Rust's Path API,
+      // but in our detector we want them as *filenames* (to match Neovim/tft and to avoid
+      // accidentally classifying `foo.zprofile`).
+      const dotfile = `.${fileType}`;
+      if (existingFilenames.has(dotfile)) {
+        // Prefer the filename mapping; do not also add an extension mapping for `fileType`.
+        continue;
+      } else {
+        // Simple string -> file extension (no leading dot)
+        if (!existingExtensions.has(fileType)) {
+          helixExtensions.push([fileType, "static", variant]);
+          existingExtensions.add(fileType);
+        }
       }
     } else if (fileType.glob && typeof fileType.glob === "string") {
       const glob = fileType.glob;
-      // Determine the type based on the glob pattern
-      if (glob.includes("/")) {
-        // Contains / -> path suffix (e.g., "i3/config")
+
+      const hasGlobMeta =
+        glob.includes("**") || /[*?{}\[\]]/.test(glob);
+
+      // Determine the type based on the glob pattern.
+      // If it has wildcard/meta syntax, it must be a PATTERN (even if it contains `/`).
+      if (hasGlobMeta) {
+        const matchFullPath = glob.includes("/");
+        const regexPattern = helixGlobToRustRegex(glob, matchFullPath);
+        helixPatterns.push([regexPattern, "static", variant, matchFullPath]);
+      } else if (glob.includes("/")) {
+        // Literal path (no wildcards) -> path suffix (e.g., "i3/config")
         if (!existingPathSuffixes.has(glob)) {
           helixPathSuffixes.push([glob, "static", variant]);
           existingPathSuffixes.add(glob);
         }
-      } else if (glob.includes("*")) {
-        // Contains wildcard -> pattern (e.g., "*SConstruct", "bash_completion.d/*")
-        // Convert to regex pattern - these will be added after pattern parsing
-        const regexPattern = "^" + glob.replace(/\*/g, ".*") + "$";
-        helixPatterns.push([regexPattern, "static", variant]);
       } else {
-        // No / or * -> filename (e.g., ".bashrc", "APKBUILD")
+        // No / and no wildcard/meta -> filename (e.g., ".bashrc", "APKBUILD")
         if (!existingFilenames.has(glob)) {
           helixFilenames.push([glob, "static", variant]);
           existingFilenames.add(glob);
@@ -1828,6 +2009,7 @@ const VARIANT_CANONICAL_NAMES: Record<string, string> = {
   "Qmljs": "qml",
   "Slang": "shaderslang",
   "Tsx": "tsx",
+  "Jsx": "jsx",
   "Diff": "gitdiff",
 };
 
@@ -1852,6 +2034,7 @@ const VARIANT_EXTRA_SERIALIZES: Record<string, string[]> = {
   "CSharp": ["cs"],
   "Diff": ["diff"],
   "Tsx": ["typescriptreact"],
+  "Jsx": ["javascriptreact"]
 };
 
 const uniqueVariants = Object.entries(variantToFiletype).sort((a, b) => a[1].localeCompare(b[1]));
@@ -1859,7 +2042,7 @@ const uniqueVariants = Object.entries(variantToFiletype).sort((a, b) => a[1].loc
 // ============================================================================
 // Generate list.rs
 // ============================================================================
-console.error("Generating src/list.rs...");
+console.log("Generating src/list.rs...");
 const listRsContent = `macro_rules! list {
     ($($(#[$($attr:meta),+])? $variant:ident $(as $as:literal)?),* $(,)?) => {
         /// A non-exhaustive list of text file types.
@@ -1945,7 +2128,7 @@ Bun.write(`${baseDir}/src/list.rs`, listRsContent);
 // ============================================================================
 // Generate file_extension.rs
 // ============================================================================
-console.error("Generating src/detect/file_extension.rs...");
+console.log("Generating src/detect/file_extension.rs...");
 const extRsContent = `use phf::{phf_map, Map};
 
 use crate::{detect, FileType, FileTypeResolver};
@@ -1989,7 +2172,7 @@ Bun.write(`${baseDir}/src/detect/file_extension.rs`, extRsContent);
 // ============================================================================
 // Generate filename.rs
 // ============================================================================
-console.error("Generating src/detect/filename.rs...");
+console.log("Generating src/detect/filename.rs...");
 const filenameRsContent = `use phf::{phf_map, Map};
 
 use crate::{detect, FileType, FileTypeResolver};
@@ -2024,7 +2207,7 @@ Bun.write(`${baseDir}/src/detect/filename.rs`, filenameRsContent);
 // ============================================================================
 // Generate path_suffix.rs
 // ============================================================================
-console.error("Generating src/detect/path_suffix.rs...");
+console.log("Generating src/detect/path_suffix.rs...");
 
 const pathSuffixRsContent = `use crate::{detect, FileType, FileTypeResolver};
 
@@ -2054,7 +2237,7 @@ Bun.write(`${baseDir}/src/detect/path_suffix.rs`, pathSuffixRsContent);
 // ============================================================================
 // Generate pattern.rs
 // ============================================================================
-console.error("Generating src/detect/pattern.rs...");
+console.log("Generating src/detect/pattern.rs...");
 
 // Parse patterns first
 const patternLines: string[] = [];
@@ -2077,8 +2260,11 @@ for (const line of patternContent.split(/\r?\n/)) {
         continue;
       }
 
-      const rustPattern = luaToRustPattern(patternMatch[1]);
-      const matchFullPath = patternMatch[1].startsWith("/") ? "true" : "false";
+      const rawLuaPattern = patternMatch[1];
+      const rustPattern = finalizeRustPatternForNvimMatch(luaToRustPattern(rawLuaPattern));
+      // Neovim patterns that contain path separators (or start with `/`) are matched against the full path.
+      // This makes entries like `Eterm/...` actually work (they cannot match a bare filename).
+      const matchFullPath = rawLuaPattern.startsWith("/") || rawLuaPattern.includes("/") ? "true" : "false";
 
       if (parsed.kind === "static") {
         const variant = ftToVariant[parsed.filetype];
@@ -2097,21 +2283,47 @@ for (const line of patternContent.split(/\r?\n/)) {
 
 // Add manual pattern overrides from reference
 // NOTE: MANUAL_PATTERDS entries are already in Rust regex format, not Lua format
-for (const [rustPattern, type, value, priority] of MANUAL_PATTERNS) {
-  const matchFullPath = rustPattern.startsWith("^.*") ? "true" : "false";
+for (const [rustPattern, type, value, priority, matchFullPathOverride] of MANUAL_PATTERNS) {
+  const matchFullPath =
+    matchFullPathOverride !== undefined
+      ? (matchFullPathOverride ? "true" : "false")
+      : (rustPattern.includes("/") ? "true" : "false");
 
   if (type === "static") {
-    const variant = ftToVariant[value];
-    if (priority === -1) {
-      patternLines.push(`        (${matchFullPath}, regex!(r"${rustPattern}").deref(), Pattern::starsetf(FileTypeResolver::Static(FileType::${variant}), None)),\n`);
+    if (priority === "starsetf") {
+      patternLines.push(
+        `        (${matchFullPath}, regex!(r"${rustPattern}").deref(), Pattern::starsetf(FileTypeResolver::Static(FileType::${value}), None)),\n`,
+      );
+    } else if (typeof priority === "number") {
+      patternLines.push(
+        `        (${matchFullPath}, regex!(r"${rustPattern}").deref(), Pattern::new(FileTypeResolver::Static(FileType::${value}), Some(${priority}))),\n`,
+      );
     } else {
-      patternLines.push(`        (${matchFullPath}, regex!(r"${rustPattern}").deref(), Pattern::new(FileTypeResolver::Static(FileType::${variant}), None)),\n`);
+      patternLines.push(`        (${matchFullPath}, regex!(r"${rustPattern}").deref(), Pattern::new(FileTypeResolver::Static(FileType::${value}), None)),\n`);
     }
   } else if (type === "dynamic") {
-    if (priority === -1) {
-      patternLines.push(`        (${matchFullPath}, regex!(r"${rustPattern}").deref(), Pattern::starsetf(FileTypeResolver::Dynamic(detect::${value}), None)),\n`);
+    if (priority === "starsetf") {
+      patternLines.push(
+        `        (${matchFullPath}, regex!(r"${rustPattern}").deref(), Pattern::starsetf(FileTypeResolver::Dynamic(detect::${value}), None)),\n`,
+      );
+    } else if (typeof priority === "number") {
+      patternLines.push(
+        `        (${matchFullPath}, regex!(r"${rustPattern}").deref(), Pattern::new(FileTypeResolver::Dynamic(detect::${value}), Some(${priority}))),\n`,
+      );
     } else {
       patternLines.push(`        (${matchFullPath}, regex!(r"${rustPattern}").deref(), Pattern::new(FileTypeResolver::Dynamic(detect::${value}), None)),\n`);
+    }
+  } else if (type === "closure") {
+    if (priority === "starsetf") {
+      patternLines.push(
+        `        (${matchFullPath}, regex!(r"${rustPattern}").deref(), Pattern::starsetf(FileTypeResolver::Dynamic(${value}), None)),\n`,
+      );
+    } else if (typeof priority === "number") {
+      patternLines.push(
+        `        (${matchFullPath}, regex!(r"${rustPattern}").deref(), Pattern::new(FileTypeResolver::Dynamic(${value}), Some(${priority}))),\n`,
+      );
+    } else {
+      patternLines.push(`        (${matchFullPath}, regex!(r"${rustPattern}").deref(), Pattern::new(FileTypeResolver::Dynamic(${value}), None)),\n`);
     }
   }
 }
@@ -2126,9 +2338,9 @@ for (const line of patternLines) {
   }
 }
 // Now add only Helix patterns that don't already exist
-for (const [regexPattern, , variant] of helixPatterns) {
+for (const [regexPattern, , variant, matchFullPath] of helixPatterns) {
   if (!existingPatterns.has(regexPattern)) {
-    patternLines.push(`        (false, regex!(r"${regexPattern}").deref(), Pattern::new(FileTypeResolver::Static(FileType::${variant}), None)),\n`);
+    patternLines.push(`        (${matchFullPath ? "true" : "false"}, regex!(r"${regexPattern}").deref(), Pattern::new(FileTypeResolver::Static(FileType::${variant}), None)),\n`);
   }
 }
 
@@ -2172,22 +2384,22 @@ Bun.write(`${baseDir}/src/detect/pattern.rs`, patternRsContent);
 // ============================================================================
 // Print stats
 // ============================================================================
-console.error("\n✅ Generated files");
-console.error("  src/list.rs");
-console.error("  src/detect/file_extension.rs");
-console.error("  src/detect/filename.rs");
-console.error("  src/detect/path_suffix.rs");
-console.error("  src/detect/pattern.rs");
-console.error("\n📊 Stats:");
-console.error(`  Total filetypes:  ${filetypeList.length}`);
-console.error(`  Extensions: ${extEntries.length} (Neovim) + ${helixExtensions.length} (Helix) = ${extEntries.length + helixExtensions.length} total`);
-console.error(`  Filenames:  ${filenameEntries.length} (Neovim) + ${helixFilenames.length} (Helix) = ${filenameEntries.length + helixFilenames.length} total`);
-console.error(`  Path suffixes: ${pathSuffixEntries.length} (Neovim) + ${helixPathSuffixes.length} (Helix) = ${pathSuffixEntries.length + helixPathSuffixes.length} total`);
-console.error(`  Patterns: ${patternLines.length} (Neovim) + ${helixPatterns.length} (Helix) = ${patternLines.length + helixPatterns.length} total`);
+console.log("\n✅ Generated files");
+console.log("  src/list.rs");
+console.log("  src/detect/file_extension.rs");
+console.log("  src/detect/filename.rs");
+console.log("  src/detect/path_suffix.rs");
+console.log("  src/detect/pattern.rs");
+console.log("\n📊 Stats:");
+console.log(`  Total filetypes:  ${filetypeList.length}`);
+console.log(`  Extensions: ${extEntries.length} (Neovim) + ${helixExtensions.length} (Helix) = ${extEntries.length + helixExtensions.length} total`);
+console.log(`  Filenames:  ${filenameEntries.length} (Neovim) + ${helixFilenames.length} (Helix) = ${filenameEntries.length + helixFilenames.length} total`);
+console.log(`  Path suffixes: ${pathSuffixEntries.length} (Neovim) + ${helixPathSuffixes.length} (Helix) = ${pathSuffixEntries.length + helixPathSuffixes.length} total`);
+console.log(`  Patterns: ${patternLines.length} (Neovim) + ${helixPatterns.length} (Helix) = ${patternLines.length + helixPatterns.length} total`);
 
 // Count dynamic entries
 const extDynamic = extEntries.filter(([, t]) => t === "detect").length;
 const filenameDynamic = filenameEntries.filter(([, t]) => t === "detect").length;
 const pathSuffixDynamic = pathSuffixEntries.filter(([, t]) => t === "detect").length;
-console.error(`\n📋 Dynamic entries: ${extDynamic} extensions, ${filenameDynamic} filenames, ${pathSuffixDynamic} path suffixes`);
-console.error("   These use detect functions from src/detect/mod.rs");
+console.log(`\n📋 Dynamic entries: ${extDynamic} extensions, ${filenameDynamic} filenames, ${pathSuffixDynamic} path suffixes`);
+console.log("   These use detect functions from src/detect/mod.rs");

@@ -297,6 +297,19 @@ fn cmd(_path: &Path, content: &str) -> Option<FileType> {
     }
 }
 
+fn comp(_path: &Path, content: &str) -> Option<FileType> {
+    // `.comp` is ambiguous (GLSL compute shader vs Mason component).
+    // Prefer Mason when we see clear templating markers, otherwise default to GLSL.
+    let head = get_lines(content, 80);
+    if regex_is_match!(
+        r"(<%|</%|<%args>|<%init>|<%perl>|<%once>|<%def\b)"i,
+        head
+    ) {
+        return Some(FileType::Mason);
+    }
+    Some(FileType::Glsl)
+}
+
 fn control(_path: &Path, content: &str) -> Option<FileType> {
     match content.starts_with("Source:") {
         true => Some(FileType::DebControl),
@@ -309,6 +322,37 @@ fn copyright(_path: &Path, content: &str) -> Option<FileType> {
         true => Some(FileType::DebCopyright),
         false => None,
     }
+}
+
+fn lib(_path: &Path, content: &str) -> Option<FileType> {
+    // `.lib` is ambiguous (Faust libraries vs COBOL libraries/copybooks; also often a Windows binary).
+    // When content is text, try to disambiguate; default to COBOL for legacy compatibility.
+    let head = get_lines(content, 200);
+
+    if util::findany(
+        head,
+        0,
+        false,
+        [
+            "IDENTIFICATION DIVISION",
+            "PROGRAM-ID.",
+            "DATA DIVISION",
+            "PROCEDURE DIVISION",
+        ],
+    ) {
+        return Some(FileType::Cobol);
+    }
+
+    if util::findany(
+        head,
+        0,
+        false,
+        ["process =", "import(\"", "declare ", "library("],
+    ) {
+        return Some(FileType::Faust);
+    }
+
+    Some(FileType::Cobol)
 }
 
 fn cpp(_path: &Path, _content: &str) -> Option<FileType> {
