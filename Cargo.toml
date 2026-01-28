@@ -24,6 +24,11 @@ name = "codegen"
 path = "src/bin/codegen.rs"
 required-features = ["serde", "palate_polyglot_tokenizer"]
 
+[[bin]]
+name = "palate"
+path = "src/bin/palate.rs"
+required-features = ["detect"]
+
 [features]
 default = ["detect"]
 
@@ -50,7 +55,9 @@ classifier = ["detect"]
 [dependencies]
 aho-corasick = { version = "1.0", optional = true }
 casey = "0.4"
+clap = { version = "4.5", features = ["std"] }
 convert_case = "0.10.0"
+ignore = "0.4"
 infer = "0.19"
 lazy-regex = { version = "3.0", optional = true }
 once_cell = { version = "1.18", optional = true }
@@ -63,6 +70,7 @@ serde_norway = "0.9"
 serde_with = { version = "3", optional = true }
 strum = { version = "0.27", features = ["derive", "phf"] }
 strum_macros = "0.27"
+termcolor = "1.4"
 tokio = { version = "1", features = ["fs", "io-util", "rt"], optional = true }
 
 [dependencies.palate_polyglot_tokenizer]

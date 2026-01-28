@@ -4,7 +4,7 @@ use lazy_regex::regex;
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-use crate::{FileType, FileTypeResolver, detect};
+use crate::{detect, FileType, FileTypeResolver};
 
 pub(crate) struct Pattern {
     pub(crate) resolver: FileTypeResolver,

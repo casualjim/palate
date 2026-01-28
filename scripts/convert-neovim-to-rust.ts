@@ -992,7 +992,7 @@ function isDetectFunctionAvailable(name: string): boolean {
 }
 
 /**
- * Manual overrides from the reference implementation
+ * Manual extension overrides from the reference implementation
  * These entries exist in the reference but not in current Neovim
  * Format: "extension": ["static"|"dynamic", "variant_or_function"]
  */
@@ -1012,6 +1012,20 @@ const MANUAL_OVERRIDES: Record<string, ["static" | "dynamic", string]> = {
   "vlg": ["static", "Verilog"],
   "zir": ["static", "Zir"],
   "ini": ["static", "ConfIni"],
+};
+
+/**
+ * Manual filename overrides from the reference implementation
+ * Format: "filename": ["static", "filetype"]
+ */
+const MANUAL_FILENAME_OVERRIDES: Record<string, ["static", string]> = {
+  ".gnuplot": ["static", "gnuplot"],
+  "config.nu": ["static", "nu"],
+  "env.nu": ["static", "nu"],
+  "printcap": ["static", "ptcap-print"],
+  "termcap": ["static", "ptcap-term"],
+  "xorg.conf": ["static", "xf86conf-4"],
+  "xorg.conf-4": ["static", "xf86conf-4"],
 };
 
 /**
@@ -1643,6 +1657,18 @@ for (const line of filenameContent.split(/\r?\n/)) {
 
     // Split based on whether the key contains a path separator
     if (key.includes("/")) {
+      // Treat root dotfiles like "/.libao" as filenames to match tft.
+      if (key.startsWith("/.") && !key.slice(2).includes("/")) {
+        const filenameKey = key.slice(1);
+        if (!seenFilenames.has(filenameKey)) {
+          recordEntry(filenameEntries, filenameKey, parsed, {
+            seen: seenFilenames,
+            filetypes,
+          });
+        }
+        continue;
+      }
+
       // Path entries go to path_suffix
       // Strip leading slash if present and convert format
       let suffixKey = key.startsWith("/") ? key.slice(1) : key;
@@ -1661,6 +1687,18 @@ for (const line of filenameContent.split(/\r?\n/)) {
       recordEntry(filenameEntries, key, parsed, { seen: seenFilenames, filetypes });
     }
   }
+}
+
+// Add manual filename overrides from reference (override existing entries if present)
+for (const [key, [, filetype]] of Object.entries(MANUAL_FILENAME_OVERRIDES)) {
+  const existingIndex = filenameEntries.findIndex(([k]) => k === key);
+  if (existingIndex >= 0) {
+    filenameEntries[existingIndex] = [key, "static", filetype];
+  } else {
+    const parsed: ParsedValue = { kind: "static", filetype };
+    recordEntry(filenameEntries, key, parsed, { seen: seenFilenames, filetypes });
+  }
+  filetypes.add(filetype);
 }
 
 // ============================================================================

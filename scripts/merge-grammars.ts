@@ -23,6 +23,10 @@ interface NvimParser {
   filetype: string | null;
 }
 
+type NvimParserWithCanonical = NvimParser & {
+  canonicalUrl: string;
+};
+
 // Map from nvim filetype to canonical filetype (what we serialize to)
 const CANONICAL_FILETYPES: Record<string, string> = {
   "cs": "csharp",
@@ -33,9 +37,17 @@ const CANONICAL_FILETYPES: Record<string, string> = {
   "vlang": "v",
 };
 
-// Get canonical filetype for a given nvim filetype
-function getCanonicalFiletype(nvimFiletype: string | null): string | null {
+// Get canonical filetype for a given nvim filetype + grammar context.
+function getEffectiveFiletype(
+  nvimFiletype: string | null,
+  grammarName: string,
+  nvimParserName: string
+): string | null {
   if (!nvimFiletype) return null;
+  // Prefer bash grammar over the generic nvim "sh" filetype.
+  if (nvimFiletype === "sh" && (grammarName === "bash" || nvimParserName === "bash")) {
+    return "bash";
+  }
   return CANONICAL_FILETYPES[nvimFiletype] ?? nvimFiletype;
 }
 
@@ -103,7 +115,7 @@ async function saveCache() {
 
 // Resolve canonical URLs for all nvim parsers concurrently
 console.log("Resolving canonical URLs for nvim-treesitter parsers...");
-const nvimParsersWithCanonical = await Promise.all(
+const nvimParsersWithCanonical: NvimParserWithCanonical[] = await Promise.all(
   nvimParsers.map(async (parser) => ({
     ...parser,
     canonicalUrl: await resolveCanonicalUrl(parser.url),
@@ -112,7 +124,7 @@ const nvimParsersWithCanonical = await Promise.all(
 console.log("✅ Resolved all URLs");
 
 // Build maps using canonical URLs - handle multiple parsers per URL
-const nvimByCanonicalUrl: Record<string, NvimParser[]> = {};
+const nvimByCanonicalUrl: Record<string, NvimParserWithCanonical[]> = {};
 for (const parser of nvimParsersWithCanonical) {
   if (!nvimByCanonicalUrl[parser.canonicalUrl]) {
     nvimByCanonicalUrl[parser.canonicalUrl] = [];
@@ -121,7 +133,7 @@ for (const parser of nvimParsersWithCanonical) {
 }
 
 // Also build repo name map as fallback - handle multiple parsers per repo name
-const nvimByRepoName: Record<string, NvimParser[]> = {};
+const nvimByRepoName: Record<string, NvimParserWithCanonical[]> = {};
 for (const parser of nvimParsersWithCanonical) {
   const repoName = parser.canonicalUrl.split("/").pop()?.replace(/\.git$/, "") || "";
   if (!nvimByRepoName[repoName]) {
@@ -131,7 +143,7 @@ for (const parser of nvimParsersWithCanonical) {
 }
 
 // Build original URL map for exact matches - handle multiple parsers per URL
-const nvimByUrl: Record<string, NvimParser[]> = {};
+const nvimByUrl: Record<string, NvimParserWithCanonical[]> = {};
 for (const parser of nvimParsersWithCanonical) {
   if (!nvimByUrl[parser.url]) {
     nvimByUrl[parser.url] = [];
@@ -170,7 +182,7 @@ const mergedMapping = grammarsWithCanonical.map((grammar) => {
 
   // Prefer parser with matching name
   if (nvimParsersByUrl) {
-    const nameMatch = nvimParsersByUrl.find((p: NvimParser) => p.name === grammarName);
+    const nameMatch = nvimParsersByUrl.find((p: NvimParserWithCanonical) => p.name === grammarName);
     if (nameMatch) {
       nvimParser = nameMatch;
       matchType = "exact_url_with_name";
@@ -184,7 +196,7 @@ const mergedMapping = grammarsWithCanonical.map((grammar) => {
   if (!nvimParser) {
     const nvimParsersByCanonical = nvimByCanonicalUrl[canonicalUrl];
     if (nvimParsersByCanonical) {
-      const nameMatch = nvimParsersByCanonical.find((p: NvimParser) => p.name === grammarName);
+      const nameMatch = nvimParsersByCanonical.find((p: NvimParserWithCanonical) => p.name === grammarName);
       if (nameMatch) {
         nvimParser = nameMatch;
         matchType = "canonical_url_with_name";
@@ -199,7 +211,7 @@ const mergedMapping = grammarsWithCanonical.map((grammar) => {
   if (!nvimParser && repoName) {
     const nvimParsersByRepoName = nvimByRepoName[repoName];
     if (nvimParsersByRepoName) {
-      const nameMatch = nvimParsersByRepoName.find((p: NvimParser) => p.name === grammarName);
+      const nameMatch = nvimParsersByRepoName.find((p: NvimParserWithCanonical) => p.name === grammarName);
       if (nameMatch) {
         nvimParser = nameMatch;
         matchType = "repo_name_with_name";
@@ -213,11 +225,15 @@ const mergedMapping = grammarsWithCanonical.map((grammar) => {
   if (nvimParser) {
     return {
       grammar: grammarName,
-      grammar_repo: repoUrl,
+      grammar_repo: canonicalUrl,
       nvim_parser: nvimParser.name,
-      nvim_repo: nvimParser.url,
+      nvim_repo: nvimParser.canonicalUrl,
       nvim_filetype: nvimParser.filetype,
-      effective_filetype: getCanonicalFiletype(nvimParser.filetype),
+      effective_filetype: getEffectiveFiletype(
+        nvimParser.filetype,
+        grammarName,
+        nvimParser.name
+      ),
       match_type: matchType,
     };
   }
@@ -225,7 +241,7 @@ const mergedMapping = grammarsWithCanonical.map((grammar) => {
   // No match found
   return {
     grammar: grammarName,
-    grammar_repo: repoUrl,
+    grammar_repo: canonicalUrl,
     nvim_parser: null,
     nvim_repo: null,
     nvim_filetype: null,

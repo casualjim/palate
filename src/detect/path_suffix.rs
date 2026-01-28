@@ -1,4 +1,4 @@
-use crate::{FileType, FileTypeResolver, detect};
+use crate::{detect, FileType, FileTypeResolver};
 
 #[rustfmt::skip]
 pub(crate) const PATH_SUFFIX: &[(&str, FileTypeResolver)] = &[
@@ -34,7 +34,6 @@ pub(crate) const PATH_SUFFIX: &[(&str, FileTypeResolver)] = &[
     ("etc/hosts.allow", FileTypeResolver::Static(FileType::HostsAccess)),
     ("etc/hosts.deny", FileTypeResolver::Static(FileType::HostsAccess)),
     (".icewm/menu", FileTypeResolver::Static(FileType::IceMenu)),
-    (".libao", FileTypeResolver::Static(FileType::Libao)),
     ("etc/libao.conf", FileTypeResolver::Static(FileType::Libao)),
     ("etc/limits", FileTypeResolver::Static(FileType::Limits)),
     ("etc/login.access", FileTypeResolver::Static(FileType::LoginAccess)),
@@ -57,7 +56,6 @@ pub(crate) const PATH_SUFFIX: &[(&str, FileTypeResolver)] = &[
     ("etc/shadow", FileTypeResolver::Static(FileType::Passwd)),
     ("etc/passwd.edit", FileTypeResolver::Static(FileType::Passwd)),
     ("etc/pinforc", FileTypeResolver::Static(FileType::PInfo)),
-    (".pinforc", FileTypeResolver::Static(FileType::PInfo)),
     ("etc/protocols", FileTypeResolver::Static(FileType::Protocols)),
     ("etc/sensors3.conf", FileTypeResolver::Static(FileType::Sensors)),
     ("etc/sensors.conf", FileTypeResolver::Static(FileType::Sensors)),
@@ -78,10 +76,10 @@ pub(crate) const PATH_SUFFIX: &[(&str, FileTypeResolver)] = &[
     ("etc/blkid.tab", FileTypeResolver::Static(FileType::Xml)),
     ("etc/blkid.tab.old", FileTypeResolver::Static(FileType::Xml)),
     ("etc/zprofile", FileTypeResolver::Static(FileType::Zsh)),
-    ("i3/config", FileTypeResolver::Static(FileType::Sh)),
-    ("sway/config", FileTypeResolver::Static(FileType::Sh)),
-    ("bash-completion/completions/*", FileTypeResolver::Static(FileType::Sh)),
-    ("bash_completion.d/*", FileTypeResolver::Static(FileType::Sh)),
+    ("i3/config", FileTypeResolver::Static(FileType::Bash)),
+    ("sway/config", FileTypeResolver::Static(FileType::Bash)),
+    ("bash-completion/completions/*", FileTypeResolver::Static(FileType::Bash)),
+    ("bash_completion.d/*", FileTypeResolver::Static(FileType::Bash)),
     ("conf/*.conf", FileTypeResolver::Static(FileType::Bitbake)),
     ("conf/*/*.{inc,conf}", FileTypeResolver::Static(FileType::Bitbake)),
     ("recipe-*/*/*.inc", FileTypeResolver::Static(FileType::Bitbake)),

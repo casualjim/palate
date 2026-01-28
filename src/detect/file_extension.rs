@@ -1,6 +1,6 @@
-use phf::{Map, phf_map};
+use phf::{phf_map, Map};
 
-use crate::{FileType, FileTypeResolver, detect};
+use crate::{detect, FileType, FileTypeResolver};
 
 pub(crate) static FILE_EXTENSION: Map<&'static str, FileTypeResolver> = phf_map! {
     "ebnf" => FileTypeResolver::Static(FileType::Ebnf),
@@ -1303,20 +1303,20 @@ pub(crate) static FILE_EXTENSION: Map<&'static str, FileTypeResolver> = phf_map!
     "agda" => FileTypeResolver::Static(FileType::Agda),
     "nawk" => FileTypeResolver::Static(FileType::Awk),
     "mawk" => FileTypeResolver::Static(FileType::Awk),
-    "ash" => FileTypeResolver::Static(FileType::Sh),
-    "dash" => FileTypeResolver::Static(FileType::Sh),
-    "mksh" => FileTypeResolver::Static(FileType::Sh),
-    "zshenv" => FileTypeResolver::Static(FileType::Sh),
-    "zlogin" => FileTypeResolver::Static(FileType::Sh),
-    "zlogout" => FileTypeResolver::Static(FileType::Sh),
-    "zprofile" => FileTypeResolver::Static(FileType::Sh),
-    "zshrc" => FileTypeResolver::Static(FileType::Sh),
-    "bazelrc" => FileTypeResolver::Static(FileType::Sh),
-    "Renviron" => FileTypeResolver::Static(FileType::Sh),
-    "cshrc" => FileTypeResolver::Static(FileType::Sh),
-    "tcshrc" => FileTypeResolver::Static(FileType::Sh),
-    "bashrc_Apple_Terminal" => FileTypeResolver::Static(FileType::Sh),
-    "zshrc_Apple_Terminal" => FileTypeResolver::Static(FileType::Sh),
+    "ash" => FileTypeResolver::Static(FileType::Bash),
+    "dash" => FileTypeResolver::Static(FileType::Bash),
+    "mksh" => FileTypeResolver::Static(FileType::Bash),
+    "zshenv" => FileTypeResolver::Static(FileType::Bash),
+    "zlogin" => FileTypeResolver::Static(FileType::Bash),
+    "zlogout" => FileTypeResolver::Static(FileType::Bash),
+    "zprofile" => FileTypeResolver::Static(FileType::Bash),
+    "zshrc" => FileTypeResolver::Static(FileType::Bash),
+    "bazelrc" => FileTypeResolver::Static(FileType::Bash),
+    "Renviron" => FileTypeResolver::Static(FileType::Bash),
+    "cshrc" => FileTypeResolver::Static(FileType::Bash),
+    "tcshrc" => FileTypeResolver::Static(FileType::Bash),
+    "bashrc_Apple_Terminal" => FileTypeResolver::Static(FileType::Bash),
+    "zshrc_Apple_Terminal" => FileTypeResolver::Static(FileType::Bash),
     "bean" => FileTypeResolver::Static(FileType::BeanCount),
     "blade" => FileTypeResolver::Static(FileType::Blade),
     "circom" => FileTypeResolver::Static(FileType::Circom),
