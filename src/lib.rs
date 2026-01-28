@@ -81,22 +81,24 @@ mod tests {
         let content = std::fs::read_to_string("fixtures/languages.toml")
             .expect("Failed to read languages.toml fixture");
 
-        let toml_data: toml::Value = toml::from_str(&content)
-            .expect("Failed to parse languages.toml");
+        let toml_data: toml::Value =
+            toml::from_str(&content).expect("Failed to parse languages.toml");
 
-        let languages = toml_data.get("languages")
-            .and_then(|l| l.as_array());
+        let languages = toml_data.get("languages").and_then(|l| l.as_array());
 
         if let Some(langs) = languages {
             let mut fromstr_passed = 0;
             let mut fromstr_failed = 0;
+            #[cfg(feature = "serde")]
             let mut serde_passed = 0;
+            #[cfg(feature = "serde")]
             let mut serde_failed = 0;
             let mut failures = Vec::new();
             let mut not_in_enum = Vec::new();
 
             for lang in langs {
-                let name = lang.get("name")
+                let name = lang
+                    .get("name")
                     .and_then(|n| n.as_str())
                     .unwrap_or("unknown");
 
@@ -113,7 +115,8 @@ mod tests {
                         Some(v) => v,
                         None => {
                             fromstr_failed += 1;
-                            failures.push(format!("{name}: non-string file-type entry: {ft_value:?}"));
+                            failures
+                                .push(format!("{name}: non-string file-type entry: {ft_value:?}"));
                             continue;
                         }
                     };
@@ -126,7 +129,9 @@ mod tests {
                         let display = ft.to_string();
                         let reparsed = FileType::from_str(&display);
 
-                        if reparsed.ok() == Some(ft) && display == ft_name {
+                        // `file-types` can contain aliases (e.g. "cs" and "csharp").
+                        // `Display` is canonical, so don't require `display == ft_name`.
+                        if reparsed.ok() == Some(ft) {
                             fromstr_passed += 1;
                         } else {
                             fromstr_failed += 1;
@@ -162,20 +167,40 @@ mod tests {
                 }
             }
 
-            println!("FromStr roundtrip: {} passed, {} failed", fromstr_passed, fromstr_failed);
+            println!(
+                "FromStr roundtrip: {} passed, {} failed",
+                fromstr_passed, fromstr_failed
+            );
             #[cfg(feature = "serde")]
-            println!("serde roundtrip: {} passed, {} failed", serde_passed, serde_failed);
+            println!(
+                "serde roundtrip: {} passed, {} failed",
+                serde_passed, serde_failed
+            );
 
             if !not_in_enum.is_empty() {
                 not_in_enum.sort();
                 not_in_enum.dedup();
-                panic!("File-types not in FileType enum ({}):\n{}", not_in_enum.len(),
-                    not_in_enum.iter().map(|l| format!("  - {}", l)).collect::<Vec<_>>().join("\n"));
+                panic!(
+                    "File-types not in FileType enum ({}):\n{}",
+                    not_in_enum.len(),
+                    not_in_enum
+                        .iter()
+                        .map(|l| format!("  - {}", l))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                );
             }
 
             if !failures.is_empty() {
-                panic!("Roundtrip failures ({}):\n{}", failures.len(),
-                    failures.iter().map(|f| format!("  {}", f)).collect::<Vec<_>>().join("\n"));
+                panic!(
+                    "Roundtrip failures ({}):\n{}",
+                    failures.len(),
+                    failures
+                        .iter()
+                        .map(|f| format!("  {}", f))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                );
             }
         }
     }

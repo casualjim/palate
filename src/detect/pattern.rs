@@ -4,7 +4,7 @@ use lazy_regex::regex;
 use once_cell::sync::Lazy;
 use regex::Regex;
 
-use crate::{detect, FileType, FileTypeResolver};
+use crate::{FileType, FileTypeResolver, detect};
 
 pub(crate) struct Pattern {
     pub(crate) resolver: FileTypeResolver,
@@ -652,6 +652,24 @@ pub(crate) static PATTERN: Lazy<Vec<(bool, &'static Regex, Pattern)>> = Lazy::ne
         (true, regex!(r"^.*\.git/.*$").deref(), Pattern::starsetf(FileTypeResolver::Dynamic(detect::git), None)),
         (true, regex!(r"^.*\.[Ll][Oo][Gg]$").deref(), Pattern::new(FileTypeResolver::Dynamic(detect::log), None)),
         (false, regex!(r"^.+~$").deref(), Pattern::new(FileTypeResolver::Dynamic(detect::tmp), None)),
+        (false, regex!(r"^.*.blade.php$").deref(), Pattern::new(FileTypeResolver::Static(FileType::Blade), None)),
+        (false, regex!(r"^Dockerfile..*$").deref(), Pattern::new(FileTypeResolver::Static(FileType::Dockerfile), None)),
+        (false, regex!(r"^dockerfile..*$").deref(), Pattern::new(FileTypeResolver::Static(FileType::Dockerfile), None)),
+        (false, regex!(r"^Containerfile..*$").deref(), Pattern::new(FileTypeResolver::Static(FileType::Dockerfile), None)),
+        (false, regex!(r"^containerfile..*$").deref(), Pattern::new(FileTypeResolver::Static(FileType::Dockerfile), None)),
+        (false, regex!(r"^.*.app.src$").deref(), Pattern::new(FileTypeResolver::Static(FileType::Erlang), None)),
+        (false, regex!(r"^Jenkinsfile..*$").deref(), Pattern::new(FileTypeResolver::Static(FileType::Groovy), None)),
+        (false, regex!(r"^.*scalafmt.*.conf$").deref(), Pattern::new(FileTypeResolver::Static(FileType::Hocon), None)),
+        (false, regex!(r"^.*scalafix.*.conf$").deref(), Pattern::new(FileTypeResolver::Static(FileType::Hocon), None)),
+        (false, regex!(r"^kconfig..*$").deref(), Pattern::new(FileTypeResolver::Static(FileType::KConfig), None)),
+        (false, regex!(r"^.*SConstruct$").deref(), Pattern::new(FileTypeResolver::Static(FileType::Python), None)),
+        (false, regex!(r"^.*SConscript$").deref(), Pattern::new(FileTypeResolver::Static(FileType::Python), None)),
+        (false, regex!(r"^.*sconstruct$").deref(), Pattern::new(FileTypeResolver::Static(FileType::Python), None)),
+        (false, regex!(r"^BUILD..*$").deref(), Pattern::new(FileTypeResolver::Static(FileType::Bzl), None)),
+        (false, regex!(r"^.*.todo.txt$").deref(), Pattern::new(FileTypeResolver::Static(FileType::Todotxt), None)),
+        (false, regex!(r"^.*.tm[Ll]anguage$").deref(), Pattern::new(FileTypeResolver::Static(FileType::Xml), None)),
+        (false, regex!(r"^.*.tm[Pp]references$").deref(), Pattern::new(FileTypeResolver::Static(FileType::Xml), None)),
+        (false, regex!(r"^.*.tm[Tt]heme$").deref(), Pattern::new(FileTypeResolver::Static(FileType::Xml), None)),
     ];
     vec.sort_unstable_by(|(_, _, pat1), (_, _, pat2)| pat2.priority.unwrap_or(0).cmp(&pat1.priority.unwrap_or(0)));
     vec

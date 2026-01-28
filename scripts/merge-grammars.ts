@@ -23,6 +23,22 @@ interface NvimParser {
   filetype: string | null;
 }
 
+// Map from nvim filetype to canonical filetype (what we serialize to)
+const CANONICAL_FILETYPES: Record<string, string> = {
+  "cs": "csharp",
+  "typescriptreact": "tsx",
+  "fsharp": "fsharp",  // already correct
+  "confini": "ini",
+  "dsp": "faust",
+  "vlang": "v",
+};
+
+// Get canonical filetype for a given nvim filetype
+function getCanonicalFiletype(nvimFiletype: string | null): string | null {
+  if (!nvimFiletype) return null;
+  return CANONICAL_FILETYPES[nvimFiletype] ?? nvimFiletype;
+}
+
 // Parse nvim-treesitter parsers to extract name, url, and filetype
 const nvimParsers: NvimParser[] = [];
 const parserBlocks = parsersContent.split(/\nlist\./).slice(1); // Skip first empty element
@@ -201,7 +217,7 @@ const mergedMapping = grammarsWithCanonical.map((grammar) => {
       nvim_parser: nvimParser.name,
       nvim_repo: nvimParser.url,
       nvim_filetype: nvimParser.filetype,
-      effective_filetype: nvimParser.filetype,
+      effective_filetype: getCanonicalFiletype(nvimParser.filetype),
       match_type: matchType,
     };
   }

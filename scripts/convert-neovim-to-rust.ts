@@ -10,6 +10,10 @@ const neovimFile = "/home/ivan/github/neovim/neovim/runtime/lua/vim/filetype.lua
 const neovimDetectFile = "/home/ivan/github/neovim/neovim/runtime/lua/vim/filetype/detect.lua";
 const baseDir = "/home/ivan/github/casualjim/palate";
 
+// Ground truth: grammars.json from breeze-tree-sitter-parsers
+const grammarsJsonPath = "/home/ivan/github/casualjim/breeze-tree-sitter-parsers/grammars.json";
+const grammarsMappingPath = "/home/ivan/github/casualjim/palate/target/grammars-mapping-enhanced.json";
+
 // Reference mapping extracted from rubixdev/tft/src/list.rs
 // This ensures consistency with the existing codebase
 const REFERENCE_MAPPING: Record<string, string> = {
@@ -69,8 +73,6 @@ const REFERENCE_MAPPING: Record<string, string> = {
   "bzl": "Bzl",
   "bzr": "Bzr",
   "c": "C",
-  "c++": "Cpp",
-  "c#": "CSharp",
   "cabal": "Cabal",
   "cabalconfig": "CabalConfig",
   "cabalproject": "CabalProject",
@@ -107,12 +109,12 @@ const REFERENCE_MAPPING: Record<string, string> = {
   "conf": "Conf",
   "config": "Config",
   "confini": "ConfIni",
+  "ini": "ConfIni",
   "context": "Context",
   "cook": "Cook",
   "coq": "Coq",
   "corn": "Corn",
   "cpon": "Cpon",
-  "cpp": "Cpp",
   "cqlang": "Cqlang",
   "crm": "Crm",
   "crontab": "Crontab",
@@ -121,7 +123,7 @@ const REFERENCE_MAPPING: Record<string, string> = {
   "csdl": "Csdl",
   "csh": "Csh",
   "csharp": "CSharp",
-  "cs": "CSharp",
+  "dsp": "Faust",
   "csp": "Csp",
   "css": "Css",
   "csv": "Csv",
@@ -203,7 +205,6 @@ const REFERENCE_MAPPING: Record<string, string> = {
   "factor": "Factor",
   "falcon": "Falcon",
   "fan": "Fan",
-  "f#": "FSharp",
   "fennel": "Fennel",
   "fetchmail": "FetchMail",
   "fgl": "Fgl",
@@ -704,6 +705,7 @@ const REFERENCE_MAPPING: Record<string, string> = {
   "voscm": "Voscm",
   "vrml": "Vrml",
   "vroom": "Vroom",
+  "vto": "Vento",
   "vue": "Vue",
   "wast": "Wast",
   "wat": "Wat",
@@ -749,8 +751,142 @@ const REFERENCE_MAPPING: Record<string, string> = {
   "zsh": "Zsh",
 };
 
+/**
+ * Convert a string to PascalCase following our naming conventions
+ */
+function toPascalCase(name: string): string {
+  // Handle special cases that differ from standard conversion
+  const specialCases: Record<string, string> = {
+    "c#": "CSharp",
+    "c++": "Cpp",
+    "f#": "FSharp",
+    "8th": "Eighth",
+    "objective-c": "ObjC",
+    "objective-c++": "ObjCpp",
+    "f*": "Fstar",
+    "m": "Mma",
+    "wolfram language": "Mma",
+    "standard ml": "Sml",
+    "supercollider": "Supercollider",
+    "star": "Starlark",
+    "sqlpl": "Plsql",
+    "euphoria": "Euphoria3",
+    "cairo zero": "Cairo",
+    "cs": "CSharp",
+    "commonlisp": "Lisp",
+    "roff manpage": "Nroff",
+    "roff": "Nroff",
+    "gnuplot": "GnuPlot",
+    "java properties": "JProperties",
+    "vim script": "Vim",
+    "vim help file": "VimHelp",
+    "hosts file": "HostsAccess",
+    "tex": "Tex",
+    "plpgsql": "Plsql",
+    "tsql": "Sql",
+    "hiveql": "Sql",
+    "glimmer ts": "JavaScriptGlimmer",
+    "nushell": "Nu",
+    "ini": "ConfIni",
+    "confini": "ConfIni",
+    "stringtemplate": "Template",
+    "javascript.glimmer": "JavaScriptGlimmer",
+    "typescript.glimmer": "TypeScriptGlimmer",
+    "htmlangular": "Angular",
+    "tla": "Tla",
+    "ps1": "Ps1",
+  };
+
+  const lower = name.toLowerCase();
+  if (specialCases[lower]) {
+    return specialCases[lower];
+  }
+
+  // Default conversion: split on non-alphanumeric and capitalize each part
+  return name
+    .replace(/[-#]/g, "_")
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join("");
+}
+
+type GrammarInfo = {
+  variant: string;
+  nvimFiletype: string | null;
+};
+
+type ParsedValue =
+  | { kind: "static"; filetype: string }
+  | { kind: "detect"; functionName: string }
+  | { kind: "closure"; expr: string }
+  | { kind: "starsetf_static"; filetype: string }
+  | { kind: "starsetf_detect"; functionName: string }
+  | { kind: "inline_function" }
+  | { kind: "unknown" };
+
+type ParseOverrides = {
+  customClosureByKey: Record<string, string>;
+  inlineFunctionDetectByKey: Record<string, string>;
+  staticFallbackByKey: Record<string, string>;
+};
+
+function buildGrammarInfo(
+  grammarsData: any,
+  grammarMappingByName: Map<string, any>,
+) {
+  const grammarInfoByName: Record<string, GrammarInfo> = {};
+  const variantByFiletype: Record<string, string> = {};
+  const filetypesFromGrammars = new Set<string>();
+
+  for (const grammar of grammarsData.grammars) {
+    const mapping = grammarMappingByName.get(grammar.name);
+    const nvimFiletype = mapping?.nvim_filetype || mapping?.effective_filetype || null;
+    const variant = toPascalCase(grammar.name);
+
+    grammarInfoByName[grammar.name] = {
+      variant,
+      nvimFiletype,
+    };
+
+    // Variant resolution should work for both the grammar name and the mapped filetype.
+    variantByFiletype[grammar.name] = variant;
+    if (nvimFiletype) {
+      variantByFiletype[nvimFiletype] = variant;
+      filetypesFromGrammars.add(nvimFiletype);
+    } else {
+      filetypesFromGrammars.add(grammar.name);
+    }
+  }
+
+  return { grammarInfoByName, variantByFiletype, filetypesFromGrammars };
+}
+
+// Read the grammars.json and mapping (ground truth)
+const grammarsData = JSON.parse(await Bun.file(grammarsJsonPath).text());
+const grammarsMapping = JSON.parse(await Bun.file(grammarsMappingPath).text());
+
+console.log(`📦 Loaded ${grammarsData.grammars.length} grammars from grammars.json`);
+
+const grammarMappingByName = new Map<string, any>();
+for (const mapping of grammarsMapping) {
+  grammarMappingByName.set(mapping.grammar, mapping);
+}
+
+const {
+  grammarInfoByName,
+  variantByFiletype,
+  filetypesFromGrammars,
+} = buildGrammarInfo(grammarsData, grammarMappingByName);
+
+console.log(`📋 Built info map for ${Object.keys(grammarInfoByName).length} grammars`);
+
 // Read the Neovim filetype.lua file
 const content = await Bun.file(neovimFile).text();
+
+// NOTE: We no longer parse nvim-treesitter parsers.lua here because:
+// 1. The regex-based parsing was buggy and caused corruption
+// 2. We now use the grammar info derived from grammars.json + grammars-mapping.json as the ground truth
+// 3. The REFERENCE_MAPPING provides additional legacy mappings for compatibility
 
 // Extract sections using the -- BEGIN/-- END markers that exist in the file
 const extMatch = content.match(/-- BEGIN EXTENSION\n(.*)\n  -- END EXTENSION/s);
@@ -780,6 +916,9 @@ const inlineDetect = new Set(["line1", "noext", "rc", "seq"]);
 for (const name of inlineDetect) {
   detectFunctions.add(name);
 }
+
+// NOTE: detectFunctions is currently collected for parity/debugging; emission is driven by
+// availableDetectFunctions to match the Rust implementation signatures.
 
 // List of detect functions that actually exist in src/detect/mod.rs
 // Only generate dynamic entries for these functions to avoid compilation errors
@@ -872,6 +1011,7 @@ const MANUAL_OVERRIDES: Record<string, ["static" | "dynamic", string]> = {
   "vh": ["static", "Verilog"],
   "vlg": ["static", "Verilog"],
   "zir": ["static", "Zir"],
+  "ini": ["static", "ConfIni"],
 };
 
 /**
@@ -880,34 +1020,63 @@ const MANUAL_OVERRIDES: Record<string, ["static" | "dynamic", string]> = {
  * priority: -1 for negative (starsetf), undefined/0 for normal
  * NOTE: These are already in Rust regex format, not Lua pattern format
  */
-const MANUAL_PATTERDS: Array<[string, "static" | "dynamic", string, number?]> = [
+const MANUAL_PATTERNS: Array<[string, "static" | "dynamic", string, number?]> = [
   // Patterns from reference that aren't in current Neovim
   ["^.*\\.git/.*$", "dynamic", "git", -1],
   ["^.*\\.[Ll][Oo][Gg]$", "dynamic", "log"],
   ["^.+~$", "dynamic", "tmp"],
 ];
 
-// Track all filetypes for the enum
+// Track all filetypes for the enum.
+// Sources are added in stages: manual overrides, grammars, Neovim tables, Helix tables,
+// detect return types, and reference mappings.
 const filetypes = new Set<string>();
-
-// Add manual override filetypes to ensure they're included in the enum
-for (const [key, [type, value]] of Object.entries(MANUAL_OVERRIDES)) {
-  if (type === "static") {
-    filetypes.add(value);
-  }
-}
 
 const extEntries: Array<[string, string, string]> = [];
 const filenameEntries: Array<[string, string, string]> = [];
 
+// Track seen keys to avoid duplicates from the source data
+const seenExtensions = new Set<string>();
+const seenFilenames = new Set<string>();
+
+// Add manual override filetypes to ensure they're included in the enum
+for (const [key, [type, value]] of Object.entries(MANUAL_OVERRIDES)) {
+  if (type === "static") {
+    filetypes.add(key);
+  }
+  // Track manual overrides to avoid duplicates from source data
+  seenExtensions.add(key);
+}
+
+// Add all grammars from grammars.json (ground truth)
+// This ensures all 348 grammars are included in the generated list.rs
+for (const filetype of filetypesFromGrammars) {
+  filetypes.add(filetype);
+}
+
+console.log(`Added ${Object.keys(grammarInfoByName).length} grammars to filetypes set`);
+
+// Add effective_filetypes from grammarsMapping to ensure languages like "cs" and "tsx" are included
+for (const mapping of grammarsMapping) {
+  if (mapping.effective_filetype && !filetypes.has(mapping.effective_filetype)) {
+    filetypes.add(mapping.effective_filetype);
+  }
+}
+
 /**
  * Convert filetype name to Rust enum variant name (PascalCase)
- * Uses the reference mapping from rubixdev/tft for consistency
+ * Uses the reference mapping from rubixdev/tft for consistency.
+ * Precedence: reference mapping -> grammar mapping -> fallback PascalCase.
  */
 function toFtVariant(str: string): string {
   // First, check the reference mapping
   if (REFERENCE_MAPPING[str]) {
     return REFERENCE_MAPPING[str];
+  }
+
+  const variantFromGrammar = variantByFiletype[str];
+  if (variantFromGrammar) {
+    return variantFromGrammar;
   }
 
   // Fallback: simple PascalCase conversion for unknown filetypes
@@ -1010,7 +1179,7 @@ function luaToRustPattern(pattern: string): string {
  * These are entries in Neovim's filetype.lua that use inline functions
  * but have corresponding detect functions implemented in Rust
  */
-const INLINE_FUNCTION_DETECT_MAPPING: Record<string, string> = {
+const INLINE_FUNCTION_DETECT_BY_KEY: Record<string, string> = {
   "asa": "asa",
   "btm": "btm",
   "hook": "hook",
@@ -1019,9 +1188,10 @@ const INLINE_FUNCTION_DETECT_MAPPING: Record<string, string> = {
 
 /**
  * Mapping of detect.* functions that don't exist in Rust but have static fallback values
- * Format: "extension": "fallback_filetype"
+ * Format: "key": "fallback_filetype"
+ * The keys are the table keys from Neovim (mostly extensions).
  */
-const STATIC_FALLBACK_EXTENSIONS: Record<string, string> = {
+const STATIC_FALLBACK_BY_KEY: Record<string, string> = {
   // Local inline functions that don't exist as detect.*
   "rc": "rc",  // detect_rc is a local inline function
   "rch": "rc", // detect_rc is a local inline function
@@ -1054,16 +1224,13 @@ const STATIC_FALLBACK_EXTENSIONS: Record<string, string> = {
   "class": "stata",
   "dsp": "dsp",
   "f": "fortran",
-
-  // Local inline functions
-  "rc": "rc",
 };
 
 /**
- * Mapping of extensions that need custom closures
- * These are for detect functions with non-standard signatures
+ * Mapping of keys that need custom closures
+ * These are for detect functions with non-standard signatures or custom fallbacks.
  */
-const CUSTOM_CLOSURE_EXTENSIONS: Record<string, string> = {
+const CUSTOM_CLOSURE_BY_KEY: Record<string, string> = {
   // bindzone has signature: fn(content: &str, default: Option<FileType>) -> Option<FileType>
   "com": '|_, content| detect::bindzone(content, Some(FileType::Dcl))',
   "db": '|_, content| detect::bindzone(content, None)',
@@ -1092,24 +1259,30 @@ const CUSTOM_CLOSURE_EXTENSIONS: Record<string, string> = {
   "t": '|path, content| detect::nroff(path, content).or_else(|| detect::perl(path, content)).or(Some(FileType::Tads))',
 };
 
+const PARSE_OVERRIDES: ParseOverrides = {
+  customClosureByKey: CUSTOM_CLOSURE_BY_KEY,
+  inlineFunctionDetectByKey: INLINE_FUNCTION_DETECT_BY_KEY,
+  staticFallbackByKey: STATIC_FALLBACK_BY_KEY,
+};
+
 /**
  * Parse a value from the table
  */
-function parseValue(value: string, key: string): [string, string | null, string | null] {
-  // Check for custom closure extensions first
-  if (key in CUSTOM_CLOSURE_EXTENSIONS) {
-    return ["closure", CUSTOM_CLOSURE_EXTENSIONS[key], null];
+function parseValue(value: string, key: string, overrides: ParseOverrides): ParsedValue {
+  // Custom closures by key (used for non-standard detect signatures).
+  if (key in overrides.customClosureByKey) {
+    return { kind: "closure", expr: overrides.customClosureByKey[key] };
   }
 
   // Check for inline function - some have corresponding detect functions
   if (value.match(/^function\s*\(/)) {
-    if (key in INLINE_FUNCTION_DETECT_MAPPING) {
-      const detectFunc = INLINE_FUNCTION_DETECT_MAPPING[key];
+    if (key in overrides.inlineFunctionDetectByKey) {
+      const detectFunc = overrides.inlineFunctionDetectByKey[key];
       if (isDetectFunctionAvailable(detectFunc)) {
-        return ["dynamic", detectFunc, null];
+        return { kind: "detect", functionName: detectFunc };
       }
     }
-    return ["inline_function", null, null];
+    return { kind: "inline_function" };
   }
 
   // Check for detect_line1 - prefer detect function if available, otherwise use fallback as static
@@ -1119,14 +1292,14 @@ function parseValue(value: string, key: string): [string, string | null, string 
     // Check if there's a detect function for this key
     const rustFuncName = getDetectFunctionName(key);
     if (isDetectFunctionAvailable(rustFuncName)) {
-      return ["dynamic", rustFuncName, null];
+      return { kind: "detect", functionName: rustFuncName };
     }
     // Otherwise, use the fallback value as static mapping
     const fallback = value.match(/['"]([^'"]+)['"]\s*\)\s*$/);
     if (fallback) {
-      return ["static", fallback[1], null];
+      return { kind: "static", filetype: fallback[1] };
     }
-    return ["static", "text", null];
+    return { kind: "static", filetype: "text" };
   }
 
   // Check for detect_seq
@@ -1134,9 +1307,9 @@ function parseValue(value: string, key: string): [string, string | null, string 
   if (seqMatch) {
     const fallback = value.match(/['"]([^'"]+)['"]\s*\)\s*$/);
     if (fallback) {
-      return ["static", fallback[1], null];
+      return { kind: "static", filetype: fallback[1] };
     }
-    return ["static", "text", null];
+    return { kind: "static", filetype: "text" };
   }
 
   // Check for starsetf
@@ -1148,41 +1321,40 @@ function parseValue(value: string, key: string): [string, string | null, string 
       if (inner[1].match(/^detect\.(\w+)/)) {
         const funcName = inner[1].match(/^detect\.(\w+)/);
         if (funcName) {
-          return ["starsetf_dynamic", getDetectFunctionName(funcName[1]), null];
+          return { kind: "starsetf_detect", functionName: getDetectFunctionName(funcName[1]) };
         }
       }
-      return ["starsetf_static", inner[1], null];
+      return { kind: "starsetf_static", filetype: inner[1] };
     }
     // Try unquoted detect reference: starsetf(detect.uci)
     const detectRef = value.match(/starsetf\s*\(\s*detect\.(\w+)\s*\)/);
     if (detectRef) {
-      return ["starsetf_dynamic", getDetectFunctionName(detectRef[1]), null];
+      return { kind: "starsetf_detect", functionName: getDetectFunctionName(detectRef[1]) };
     }
     // Catch other unquoted references: starsetf(apachestyle)
     const plainRef = value.match(/starsetf\s*\(\s*(\w+)\s*\)/);
     if (plainRef) {
-      return ["starsetf_static", plainRef[1], null];
+      return { kind: "starsetf_static", filetype: plainRef[1] };
     }
     // Inline function - skip this entry
-    return ["inline_function", null, null];
+    return { kind: "inline_function" };
   }
 
   // Check for bare detect function references (detect_noext, detect_rc, etc.)
   if (value.match(/^detect_[a-z_]+$/)) {
     const funcName = value.match(/^detect_([a-z_]+)$/);
     if (funcName) {
-      const fullFuncName = funcName[0]; // e.g., "detect_noext"
       // Try to use the detect function first
       const rustFuncName = getDetectFunctionName(funcName[1]);
       if (isDetectFunctionAvailable(rustFuncName)) {
-        return ["dynamic", rustFuncName, null];
+        return { kind: "detect", functionName: rustFuncName };
       }
       // Only fall back to static if function doesn't exist
-      if (key in STATIC_FALLBACK_EXTENSIONS) {
-        return ["static", STATIC_FALLBACK_EXTENSIONS[key], null];
+      if (key in overrides.staticFallbackByKey) {
+        return { kind: "static", filetype: overrides.staticFallbackByKey[key] };
       }
       // Otherwise skip
-      return ["inline_function", null, null];
+      return { kind: "inline_function" };
     }
   }
 
@@ -1192,25 +1364,25 @@ function parseValue(value: string, key: string): [string, string | null, string 
     if (funcName) {
       const detectFuncName = funcName[1]; // e.g., "bash" from "detect.bash"
       // Check if this function has a custom closure
-      if (detectFuncName in CUSTOM_CLOSURE_EXTENSIONS) {
-        return ["closure", CUSTOM_CLOSURE_EXTENSIONS[detectFuncName], null];
+      if (detectFuncName in overrides.customClosureByKey) {
+        return { kind: "closure", expr: overrides.customClosureByKey[detectFuncName] };
       }
       const rustFuncName = getDetectFunctionName(detectFuncName);
       // Check if this function has a static fallback
-      if (key in STATIC_FALLBACK_EXTENSIONS) {
-        return ["static", STATIC_FALLBACK_EXTENSIONS[key], null];
+      if (key in overrides.staticFallbackByKey) {
+        return { kind: "static", filetype: overrides.staticFallbackByKey[key] };
       }
-      return ["dynamic", rustFuncName, null];
+      return { kind: "detect", functionName: rustFuncName };
     }
   }
 
   // Extract string value from quotes: '8th' or "8th"
   const strValue = value.match(/['"]([^'"]+)['"]/);
   if (strValue) {
-    return ["static", strValue[1], null];
+    return { kind: "static", filetype: strValue[1] };
   }
 
-  return ["unknown", null, null];
+  return { kind: "unknown" };
 }
 
 // Detect function return values mapping
@@ -1310,6 +1482,82 @@ const detectReturns: Record<string, Record<string, boolean>> = {
   y: { yacc: true, racc: true },
 };
 
+type EntryKind = "static" | "detect" | "closure" | "starsetf_static" | "starsetf_detect";
+
+function addDetectReturnFiletypes(filetypes: Set<string>, detectFunc: string): void {
+  const returns = detectReturns[detectFunc];
+  if (!returns) {
+    return;
+  }
+  for (const ft of Object.keys(returns)) {
+    filetypes.add(ft);
+  }
+}
+
+function collectFiletypesFromParsedValue(filetypes: Set<string>, parsed: ParsedValue): void {
+  switch (parsed.kind) {
+    case "static":
+    case "starsetf_static":
+      filetypes.add(parsed.filetype);
+      break;
+    case "detect":
+    case "starsetf_detect":
+      addDetectReturnFiletypes(filetypes, parsed.functionName);
+      break;
+    default:
+      break;
+  }
+}
+
+function recordEntry(
+  entries: Array<[string, EntryKind, string]>,
+  key: string,
+  parsed: ParsedValue,
+  options: {
+    seen?: Set<string>;
+    allowedKinds?: ReadonlySet<EntryKind>;
+    filetypes?: Set<string>;
+  },
+): void {
+  if (parsed.kind === "inline_function" || parsed.kind === "unknown") {
+    return;
+  }
+
+  const entryKind = parsed.kind as EntryKind;
+  if (options.allowedKinds && !options.allowedKinds.has(entryKind)) {
+    return;
+  }
+
+  if (options.seen && options.seen.has(key)) {
+    return;
+  }
+
+  switch (parsed.kind) {
+    case "static":
+      entries.push([key, "static", parsed.filetype]);
+      break;
+    case "detect":
+      entries.push([key, "detect", parsed.functionName]);
+      break;
+    case "closure":
+      entries.push([key, "closure", parsed.expr]);
+      break;
+    case "starsetf_static":
+      entries.push([key, "starsetf_static", parsed.filetype]);
+      break;
+    case "starsetf_detect":
+      entries.push([key, "starsetf_detect", parsed.functionName]);
+      break;
+  }
+
+  if (options.seen) {
+    options.seen.add(key);
+  }
+  if (options.filetypes) {
+    collectFiletypesFromParsedValue(options.filetypes, parsed);
+  }
+}
+
 // ============================================================================
 // Parse extension table
 // ============================================================================
@@ -1333,45 +1581,35 @@ for (const line of extContent.split(/\r?\n/)) {
   }
 
   if (key && rest) {
+    // Skip if we've already seen this extension (duplicate in source data)
+    if (seenExtensions.has(key)) {
+      continue;
+    }
+
     // Strip trailing comma
     rest = rest.replace(/,\s*$/, "");
-    const [valueType, value1, value2] = parseValue(rest, key);
-
-    if (valueType === "static" && value1) {
-      extEntries.push([key, "static", value1]);
-      filetypes.add(value1);
-    } else if (valueType === "dynamic" && value1) {
-      extEntries.push([key, "detect", value1]);
-      // Add all possible return filetypes from this detect function
-      if (detectReturns[value1]) {
-        for (const ft of Object.keys(detectReturns[value1])) {
-          filetypes.add(ft);
-        }
-      }
-      // Add fallback filetype if provided
-      if (value2) {
-        filetypes.add(value2);
-      }
-    } else if (valueType === "closure" && value1) {
-      extEntries.push([key, "closure", value1]);
-    } else if (valueType === "starsetf_static" && value1) {
-      extEntries.push([key, "starsetf_static", value1]);
-      filetypes.add(value1);
-    } else if (valueType === "starsetf_dynamic" && value1) {
-      extEntries.push([key, "starsetf_detect", value1]);
-      if (detectReturns[value1]) {
-        for (const ft of Object.keys(detectReturns[value1])) {
-          filetypes.add(ft);
-        }
-      }
-    }
+    const parsed = parseValue(rest, key, PARSE_OVERRIDES);
+    recordEntry(extEntries, key, parsed, { seen: seenExtensions, filetypes });
   }
 }
+
+// ============================================================================
+// Helix arrays (will be populated after all Neovim data is parsed)
+// ============================================================================
+const helixExtensions: Array<[string, string, string]> = [];
+const helixFilenames: Array<[string, string, string]> = [];
+const helixPathSuffixes: Array<[string, string, string]> = [];
+const helixPatterns: Array<[string, string, number?]> = [];
 
 // ============================================================================
 // Parse filename table
 // ============================================================================
 const pathSuffixEntries: Array<[string, string, string]> = [];
+const PATH_SUFFIX_ALLOWED_KINDS: ReadonlySet<EntryKind> = new Set([
+  "static",
+  "detect",
+  "closure",
+]);
 
 for (const line of filenameContent.split(/\r?\n/)) {
   const trimmed = line.trim();
@@ -1401,7 +1639,7 @@ for (const line of filenameContent.split(/\r?\n/)) {
     }
     // Strip trailing comma
     rest = rest.replace(/,\s*$/, "");
-    const [valueType, value1, value2] = parseValue(rest, key);
+    const parsed = parseValue(rest, key, PARSE_OVERRIDES);
 
     // Split based on whether the key contains a path separator
     if (key.includes("/")) {
@@ -1409,50 +1647,18 @@ for (const line of filenameContent.split(/\r?\n/)) {
       // Strip leading slash if present and convert format
       let suffixKey = key.startsWith("/") ? key.slice(1) : key;
 
-      if (valueType === "static" && value1) {
-        pathSuffixEntries.push([suffixKey, "static", value1]);
-        filetypes.add(value1);
-      } else if (valueType === "dynamic" && value1) {
-        pathSuffixEntries.push([suffixKey, "detect", value1]);
-        if (detectReturns[value1]) {
-          for (const ft of Object.keys(detectReturns[value1])) {
-            filetypes.add(ft);
-          }
-        }
-        if (value2) {
-          filetypes.add(value2);
-        }
-      } else if (valueType === "closure" && value1) {
-        pathSuffixEntries.push([suffixKey, "closure", value1]);
-      }
+      recordEntry(pathSuffixEntries, suffixKey, parsed, {
+        allowedKinds: PATH_SUFFIX_ALLOWED_KINDS,
+        filetypes,
+      });
     } else {
       // Plain filename entries go to filename
-      if (valueType === "static" && value1) {
-        filenameEntries.push([key, "static", value1]);
-        filetypes.add(value1);
-      } else if (valueType === "dynamic" && value1) {
-        filenameEntries.push([key, "detect", value1]);
-        if (detectReturns[value1]) {
-          for (const ft of Object.keys(detectReturns[value1])) {
-            filetypes.add(ft);
-          }
-        }
-        if (value2) {
-          filetypes.add(value2);
-        }
-      } else if (valueType === "starsetf_static" && value1) {
-        filenameEntries.push([key, "starsetf_static", value1]);
-        filetypes.add(value1);
-      } else if (valueType === "starsetf_dynamic" && value1) {
-        filenameEntries.push([key, "starsetf_detect", value1]);
-        if (detectReturns[value1]) {
-          for (const ft of Object.keys(detectReturns[value1])) {
-            filetypes.add(ft);
-          }
-        }
-      } else if (valueType === "closure" && value1) {
-        filenameEntries.push([key, "closure", value1]);
+      // Skip if we've already seen this filename (duplicate in source data)
+      if (seenFilenames.has(key)) {
+        continue;
       }
+
+      recordEntry(filenameEntries, key, parsed, { seen: seenFilenames, filetypes });
     }
   }
 }
@@ -1472,31 +1678,78 @@ for (const line of patternContent.split(/\r?\n/)) {
       let rest = patternMatch[2];
       // Strip trailing comma
       rest = rest.replace(/,\s*$/, "");
-      const [valueType, value1, value2] = parseValue(rest, patternMatch[1]);
+      const parsed = parseValue(rest, patternMatch[1], PARSE_OVERRIDES);
+      collectFiletypesFromParsedValue(filetypes, parsed);
+    }
+  }
+}
 
-      if (valueType === "static" && value1) {
-        filetypes.add(value1);
-      } else if (valueType === "dynamic" && value1) {
-        if (detectReturns[value1]) {
-          for (const ft of Object.keys(detectReturns[value1])) {
-            filetypes.add(ft);
-          }
+// ============================================================================
+// Add Helix file-types (from Helix editor's languages.toml)
+// ============================================================================
+// Build sets of existing entries for deduplication
+const existingExtensions = new Set<string>();
+// Add MANUAL_OVERRIDES to existingExtensions
+for (const key of Object.keys(MANUAL_OVERRIDES)) {
+  existingExtensions.add(key);
+}
+// Add entries from parsed source data
+for (const [ext, , ] of extEntries) {
+  existingExtensions.add(ext);
+}
+const existingFilenames = new Set<string>();
+for (const [filename, , ] of filenameEntries) {
+  existingFilenames.add(filename);
+}
+const existingPathSuffixes = new Set<string>();
+for (const [suffix, , ] of pathSuffixEntries) {
+  existingPathSuffixes.add(suffix);
+}
+
+// Process Helix data (except patterns - those will be added after pattern parsing)
+for (const mapping of grammarsMapping) {
+  if (!mapping.helix_file_types) continue;
+
+  // Get the effective filetype to use for variant lookup
+  const effectiveFiletype = mapping.effective_filetype || mapping.grammar;
+  const variant = toFtVariant(effectiveFiletype);
+
+  for (const fileType of mapping.helix_file_types) {
+    if (typeof fileType === "string") {
+      // Simple string -> file extension (no leading dot)
+      if (!existingExtensions.has(fileType)) {
+        helixExtensions.push([fileType, "static", variant]);
+        existingExtensions.add(fileType);
+      }
+    } else if (fileType.glob && typeof fileType.glob === "string") {
+      const glob = fileType.glob;
+      // Determine the type based on the glob pattern
+      if (glob.includes("/")) {
+        // Contains / -> path suffix (e.g., "i3/config")
+        if (!existingPathSuffixes.has(glob)) {
+          helixPathSuffixes.push([glob, "static", variant]);
+          existingPathSuffixes.add(glob);
         }
-        if (value2) {
-          filetypes.add(value2);
-        }
-      } else if (valueType === "starsetf_static" && value1) {
-        filetypes.add(value1);
-      } else if (valueType === "starsetf_dynamic" && value1) {
-        if (detectReturns[value1]) {
-          for (const ft of Object.keys(detectReturns[value1])) {
-            filetypes.add(ft);
-          }
+      } else if (glob.includes("*")) {
+        // Contains wildcard -> pattern (e.g., "*SConstruct", "bash_completion.d/*")
+        // Convert to regex pattern - these will be added after pattern parsing
+        const regexPattern = "^" + glob.replace(/\*/g, ".*") + "$";
+        helixPatterns.push([regexPattern, "static", variant]);
+      } else {
+        // No / or * -> filename (e.g., ".bashrc", "APKBUILD")
+        if (!existingFilenames.has(glob)) {
+          helixFilenames.push([glob, "static", variant]);
+          existingFilenames.add(glob);
         }
       }
     }
   }
 }
+
+console.log(`Adding ${helixExtensions.length} Helix file extensions`);
+console.log(`Adding ${helixFilenames.length} Helix filenames`);
+console.log(`Adding ${helixPathSuffixes.length} Helix path suffixes`);
+console.log(`Adding ${helixPatterns.length} Helix patterns (will be added after pattern parsing)`);
 
 // ============================================================================
 // Add all filetypes from detectReturns to ensure all detect function return types are included
@@ -1517,13 +1770,29 @@ for (const ft of Object.keys(REFERENCE_MAPPING)) {
 // Sort filetypes alphabetically and build variant mapping
 // ============================================================================
 const filetypeList = Array.from(filetypes).sort();
+
 const ftToVariant: Record<string, string> = {};
 for (const ft of filetypeList) {
   ftToVariant[ft] = toFtVariant(ft);
 }
 
 // Deduplicate variants - if multiple filetypes map to the same variant,
-// only use the first one (which will be alphabetically first due to sorting)
+// only use the first one (which will be alphabetically first due to sorting).
+// We then override with canonical names where we want specific serialization.
+const VARIANT_CANONICAL_NAMES: Record<string, string> = {
+  "FSharp": "fsharp",
+  "CSharp": "csharp",
+  "ConfIni": "ini",
+  "Vento": "vto",
+  "Faust": "faust",
+  "HaskellPersistent": "haskellpersistent",
+  "Idris": "idris2",
+  "Qmljs": "qml",
+  "Slang": "shaderslang",
+  "Tsx": "tsx",
+  "Diff": "gitdiff",
+};
+
 const variantToFiletype: Record<string, string> = {};
 for (const ft of filetypeList) {
   const variant = ftToVariant[ft];
@@ -1531,6 +1800,22 @@ for (const ft of filetypeList) {
     variantToFiletype[variant] = ft;
   }
 }
+
+// Apply canonical name overrides
+for (const [variant, canonicalFt] of Object.entries(VARIANT_CANONICAL_NAMES)) {
+  if (variantToFiletype[variant]) {
+    variantToFiletype[variant] = canonicalFt;
+  }
+}
+
+// Extra serialize names for variants that need multiple aliases
+// Key: variant name, Value: array of additional serialize names (beyond the canonical one)
+const VARIANT_EXTRA_SERIALIZES: Record<string, string[]> = {
+  "CSharp": ["cs"],
+  "Diff": ["diff"],
+  "Tsx": ["typescriptreact"],
+};
+
 const uniqueVariants = Object.entries(variantToFiletype).sort((a, b) => a[1].localeCompare(b[1]));
 
 // ============================================================================
@@ -1538,7 +1823,7 @@ const uniqueVariants = Object.entries(variantToFiletype).sort((a, b) => a[1].loc
 // ============================================================================
 console.error("Generating src/list.rs...");
 const listRsContent = `macro_rules! list {
-    ($($variant:ident $(as $as:literal)?),* $(,)?) => {
+    ($($(#[$($attr:meta),+])? $variant:ident $(as $as:literal)?),* $(,)?) => {
         /// A non-exhaustive list of text file types.
         ///
         /// The type derives the following traits for convenience. For (de)serialization to/from strings,
@@ -1564,8 +1849,8 @@ const listRsContent = `macro_rules! list {
             strum::Display,
             strum::AsRefStr,
             strum::IntoStaticStr,
-            strum::EnumString,
-            strum::EnumVariantNames,
+            strum_macros::EnumString,
+            strum_macros::VariantNames,
             Clone,
             Copy,
             Debug,
@@ -1586,7 +1871,8 @@ const listRsContent = `macro_rules! list {
             Text,
 
             $(
-                #[doc = concat!("(De)serialized as \`", $($as, ", **not** \`",)? casey::lower!(stringify!($variant)), "\`.")]
+                $(#[$($attr),+])?
+                #[doc = concat!("(De)serialized as \`", $($as, "\`, **not** \`",)? casey::lower!(stringify!($variant)), "\`")]
                 $(#[strum(serialize = $as)])?
                 $variant,
             )*
@@ -1599,10 +1885,18 @@ ${uniqueVariants
   .filter(([, ft]) => ft !== "text")
   .map(([variant, ft]) => {
     const simpleLower = variant.toLowerCase();
-    if (ft !== simpleLower) {
-      return `    ${variant} as "${ft}",\n`;
+    const extraSerializes = VARIANT_EXTRA_SERIALIZES[variant];
+    let attrs = "";
+    if (extraSerializes && extraSerializes.length > 0) {
+      const serializeAttrs = extraSerializes.map(s => `serialize = "${s}"`).join(", ");
+      attrs = `    #[strum(${serializeAttrs})]\n`;
+      // Always use explicit "as" when there are extra serializes to ensure canonical name is preserved
+      return `${attrs}    ${variant} as "${ft}",\n`;
     }
-    return `    ${variant},\n`;
+    if (ft !== simpleLower) {
+      return `${attrs}    ${variant} as "${ft}",\n`;
+    }
+    return `${attrs}    ${variant},\n`;
   })
   .join("")}
 }
@@ -1622,8 +1916,8 @@ pub(crate) static FILE_EXTENSION: Map<&'static str, FileTypeResolver> = phf_map!
 ${Object.entries(MANUAL_OVERRIDES)
   .map(([key, [type, value]]) => {
     if (type === "static") {
-      const variant = ftToVariant[value];
-      return `    "${key}" => FileTypeResolver::Static(FileType::${variant}),\n`;
+      // value is already the variant name for MANUAL_OVERRIDES
+      return `    "${key}" => FileTypeResolver::Static(FileType::${value}),\n`;
     } else {
       return `    "${key}" => FileTypeResolver::Dynamic(detect::${value}),\n`;
     }
@@ -1644,6 +1938,10 @@ ${Object.entries(MANUAL_OVERRIDES)
   .filter(([, typeValue]) => typeValue === "closure")
   .map(([key, , value]) => {
     return `    "${key}" => FileTypeResolver::Dynamic(${value}),\n`;
+  })
+  .join("")}${helixExtensions
+  .map(([key, , value]) => {
+    return `    "${key}" => FileTypeResolver::Static(FileType::${value}),\n`;
   })
   .join("")}};
 `;
@@ -1676,6 +1974,10 @@ ${filenameEntries
   .map(([key, , value]) => {
     return `    "${key}" => FileTypeResolver::Dynamic(${value}),\n`;
   })
+  .join("")}${helixFilenames
+  .map(([key, , value]) => {
+    return `    "${key}" => FileTypeResolver::Static(FileType::${value}),\n`;
+  })
   .join("")}};
 `;
 
@@ -1702,6 +2004,10 @@ ${pathSuffixEntries
     }
     return "";
   })
+  .join("")}${helixPathSuffixes
+  .map(([key, , value]) => {
+    return `    ("${key}", FileTypeResolver::Static(FileType::${value})),\n`;
+  })
   .join("")}];
 `;
 
@@ -1726,26 +2032,26 @@ for (const line of patternContent.split(/\r?\n/)) {
       let rest = patternMatch[2];
       // Strip trailing comma
       rest = rest.replace(/,\s*$/, "");
-      const [valueType, value1] = parseValue(rest, patternMatch[1]);
+      const parsed = parseValue(rest, patternMatch[1], PARSE_OVERRIDES);
 
       // Skip inline functions and unknown entries
-      if (valueType === "inline_function" || valueType === "unknown") {
+      if (parsed.kind === "inline_function" || parsed.kind === "unknown") {
         continue;
       }
 
       const rustPattern = luaToRustPattern(patternMatch[1]);
       const matchFullPath = patternMatch[1].startsWith("/") ? "true" : "false";
 
-      if (valueType === "static" && value1) {
-        const variant = ftToVariant[value1];
+      if (parsed.kind === "static") {
+        const variant = ftToVariant[parsed.filetype];
         patternLines.push(`        (${matchFullPath}, regex!(r"${rustPattern}").deref(), Pattern::new(FileTypeResolver::Static(FileType::${variant}), None)),\n`);
-      } else if (valueType === "dynamic" && value1 && isDetectFunctionAvailable(value1)) {
-        patternLines.push(`        (${matchFullPath}, regex!(r"${rustPattern}").deref(), Pattern::new(FileTypeResolver::Dynamic(detect::${value1}), None)),\n`);
-      } else if (valueType === "starsetf_static" && value1) {
-        const variant = ftToVariant[value1];
+      } else if (parsed.kind === "detect" && isDetectFunctionAvailable(parsed.functionName)) {
+        patternLines.push(`        (${matchFullPath}, regex!(r"${rustPattern}").deref(), Pattern::new(FileTypeResolver::Dynamic(detect::${parsed.functionName}), None)),\n`);
+      } else if (parsed.kind === "starsetf_static") {
+        const variant = ftToVariant[parsed.filetype];
         patternLines.push(`        (${matchFullPath}, regex!(r"${rustPattern}").deref(), Pattern::starsetf(FileTypeResolver::Static(FileType::${variant}), None)),\n`);
-      } else if (valueType === "starsetf_dynamic" && value1 && isDetectFunctionAvailable(value1)) {
-        patternLines.push(`        (${matchFullPath}, regex!(r"${rustPattern}").deref(), Pattern::starsetf(FileTypeResolver::Dynamic(detect::${value1}), None)),\n`);
+      } else if (parsed.kind === "starsetf_detect" && isDetectFunctionAvailable(parsed.functionName)) {
+        patternLines.push(`        (${matchFullPath}, regex!(r"${rustPattern}").deref(), Pattern::starsetf(FileTypeResolver::Dynamic(detect::${parsed.functionName}), None)),\n`);
       }
     }
   }
@@ -1753,7 +2059,7 @@ for (const line of patternContent.split(/\r?\n/)) {
 
 // Add manual pattern overrides from reference
 // NOTE: MANUAL_PATTERDS entries are already in Rust regex format, not Lua format
-for (const [rustPattern, type, value, priority] of MANUAL_PATTERDS) {
+for (const [rustPattern, type, value, priority] of MANUAL_PATTERNS) {
   const matchFullPath = rustPattern.startsWith("^.*") ? "true" : "false";
 
   if (type === "static") {
@@ -1769,6 +2075,22 @@ for (const [rustPattern, type, value, priority] of MANUAL_PATTERDS) {
     } else {
       patternLines.push(`        (${matchFullPath}, regex!(r"${rustPattern}").deref(), Pattern::new(FileTypeResolver::Dynamic(detect::${value}), None)),\n`);
     }
+  }
+}
+
+// Add Helix patterns (from glob patterns with wildcards)
+// First, build a set of existing patterns for deduplication
+const existingPatterns = new Set<string>();
+for (const line of patternLines) {
+  const match = line.match(/regex!\(r"([^"]+)"\)/);
+  if (match) {
+    existingPatterns.add(match[1]);
+  }
+}
+// Now add only Helix patterns that don't already exist
+for (const [regexPattern, , variant] of helixPatterns) {
+  if (!existingPatterns.has(regexPattern)) {
+    patternLines.push(`        (false, regex!(r"${regexPattern}").deref(), Pattern::new(FileTypeResolver::Static(FileType::${variant}), None)),\n`);
   }
 }
 
@@ -1820,10 +2142,10 @@ console.error("  src/detect/path_suffix.rs");
 console.error("  src/detect/pattern.rs");
 console.error("\n📊 Stats:");
 console.error(`  Total filetypes:  ${filetypeList.length}`);
-console.error(`  Extensions: ${extEntries.length}`);
-console.error(`  Filenames:  ${filenameEntries.length}`);
-console.error(`  Path suffixes: ${pathSuffixEntries.length}`);
-console.error(`  Patterns included: ${patternLines.length}`);
+console.error(`  Extensions: ${extEntries.length} (Neovim) + ${helixExtensions.length} (Helix) = ${extEntries.length + helixExtensions.length} total`);
+console.error(`  Filenames:  ${filenameEntries.length} (Neovim) + ${helixFilenames.length} (Helix) = ${filenameEntries.length + helixFilenames.length} total`);
+console.error(`  Path suffixes: ${pathSuffixEntries.length} (Neovim) + ${helixPathSuffixes.length} (Helix) = ${pathSuffixEntries.length + helixPathSuffixes.length} total`);
+console.error(`  Patterns: ${patternLines.length} (Neovim) + ${helixPatterns.length} (Helix) = ${patternLines.length + helixPatterns.length} total`);
 
 // Count dynamic entries
 const extDynamic = extEntries.filter(([, t]) => t === "detect").length;

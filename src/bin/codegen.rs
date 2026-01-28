@@ -164,7 +164,7 @@ const MAX_TOKEN_BYTES: usize = 32;
 
 fn main() {
     let heuristics: Heuristics =
-        serde_yaml::from_str(&fs::read_to_string(HEURISTICS_SOURCE_FILE).unwrap()[..]).unwrap();
+        serde_norway::from_str(&fs::read_to_string(HEURISTICS_SOURCE_FILE).unwrap()[..]).unwrap();
     create_disambiguation_heuristics_map(heuristics);
 
     // Only train classifier if samples directory exists
@@ -242,8 +242,9 @@ fn train_classifier() {
             // When tokenizing an invalid utf8 string, just set it to ""
             // Add better error handling here in the future but unure of the best
             // way to handle it now
-            let tokens =
-                palate_polyglot_tokenizer::get_key_tokens(std::str::from_utf8(&content[..]).unwrap_or(""));
+            let tokens = palate_polyglot_tokenizer::get_key_tokens(
+                std::str::from_utf8(&content[..]).unwrap_or(""),
+            );
 
             for token in tokens {
                 if token.len() <= MAX_TOKEN_BYTES {
@@ -262,17 +263,28 @@ fn train_classifier() {
 
     // Write token log probabilities
     let mut file = BufWriter::new(File::create(TOKEN_LOG_PROBABILITY_FILE).unwrap());
-    let mut language_token_log_probabilities = PhfMap::new();
+    let mut language_entries: Vec<(String, String)> = Vec::new();
     for (language, token_count_map) in temp_token_count.iter() {
         let total_tokens = *temp_total_tokens_count.get(language).unwrap() as f64;
         let mut token_log_probabilities = PhfMap::new();
+        let mut token_entries: Vec<(String, String)> = Vec::new();
         for (token, token_count) in token_count_map.iter() {
             let probability = (*token_count as f64) / (total_tokens);
             let log_probability = probability.ln();
-            token_log_probabilities.entry(&token[..], &format!("{}f64", log_probability)[..]);
+            token_entries.push((token.clone(), format!("{}f64", log_probability)));
         }
-        let codegen_log_prob_map = format!("{}", token_log_probabilities.build());
-        language_token_log_probabilities.entry(&language[..], &codegen_log_prob_map[..]);
+        for (token, value) in token_entries.iter() {
+            token_log_probabilities.entry(token.as_str(), value.as_str());
+        }
+        language_entries.push((
+            language.clone(),
+            token_log_probabilities.build().to_string(),
+        ));
+    }
+
+    let mut language_token_log_probabilities = PhfMap::new();
+    for (language, map) in language_entries.iter() {
+        language_token_log_probabilities.entry(language.as_str(), map.as_str());
     }
 
     writeln!(
@@ -293,62 +305,96 @@ fn to_pascal_case(s: &str) -> String {
         "objective-c" => return String::from("ObjC"),
         "objective-c++" => return String::from("ObjCpp"),
         "f*" => return String::from("Fstar"),
-        "m" => return String::from("Mma"),                 // Mathematica/Wolfram Language -> Mma
+        "m" => return String::from("Mma"), // Mathematica/Wolfram Language -> Mma
         "wolfram language" => return String::from("Mma"),
         "standard ml" => return String::from("Sml"),
         "supercollider" => return String::from("Supercollider"),
-        "star" => return String::from("Starlark"),        // Star (Q) -> Starlark
-        "sqlpl" => return String::from("Plsql"),           // SQLPL -> Plsql
-        "euphoria" => return String::from("Euphoria3"),    // Euphoria -> Euphoria3
-        "cairo zero" => return String::from("Cairo"),   // Cairo Zero -> Cairo
-        "common lisp" => return String::from("Lisp"),    // Common Lisp -> Lisp
-        "roff manpage" => return String::from("Nroff"),  // Roff Manpage -> Nroff
-        "roff" => return String::from("Nroff"),          // Roff -> Nroff
-        "gnuplot" => return String::from("GnuPlot"),    // gnuplot -> GnuPlot
-        "java properties" => return String::from("JProperties"),  // java properties -> JProperties
-        "vim script" => return String::from("Vim"),     // vim script -> Vim
+        "star" => return String::from("Starlark"), // Star (Q) -> Starlark
+        "sqlpl" => return String::from("Plsql"),   // SQLPL -> Plsql
+        "euphoria" => return String::from("Euphoria3"), // Euphoria -> Euphoria3
+        "cairo zero" => return String::from("Cairo"), // Cairo Zero -> Cairo
+        "common lisp" => return String::from("Lisp"), // Common Lisp -> Lisp
+        "roff manpage" => return String::from("Nroff"), // Roff Manpage -> Nroff
+        "roff" => return String::from("Nroff"),    // Roff -> Nroff
+        "gnuplot" => return String::from("GnuPlot"), // gnuplot -> GnuPlot
+        "java properties" => return String::from("JProperties"), // java properties -> JProperties
+        "vim script" => return String::from("Vim"), // vim script -> Vim
         "vim help file" => return String::from("VimHelp"), // vim help file -> VimHelp
-        "hosts file" => return String::from("HostsAccess"),  // hosts file -> HostsAccess
-        "tex" => return String::from("Tex"),            // tex -> Tex
-        "plpgsql" => return String::from("Plsql"),     // plpgsql -> Plsql
-        "tsql" => return String::from("Sql"),          // tsql -> Sql
-        "hiveql" => return String::from("Sql"),         // hiveql -> Sql
-        "glimmer ts" => return String::from("JavaScriptGlimmer"),  // glimmer ts -> JavaScriptGlimmer
-        "nushell" => return String::from("Nu"),          // nushell -> Nu
-        "ini" => return String::from("ConfIni"),       // ini -> ConfIni
-        "stringtemplate" => return String::from("Template"),  // stringtemplate -> Template
-        "oasv2-json" => return String::from("Json"),    // OAS v2 JSON -> Json
-        "oasv2-yaml" => return String::from("Yaml"),    // OAS v2 YAML -> Yaml
-        "oasv3-json" => return String::from("Json"),    // OAS v3 JSON -> Json
-        "oasv3-yaml" => return String::from("Yaml"),    // OAS v3 YAML -> Yaml
-        "java server pages" => return String::from("Jsp"),  // java server pages -> Jsp
-        "go template" => return String::from("Gotmpl"),  // go template -> Gotmpl
-        "makefile" => return String::from("Make"),  // makefile -> Make
+        "hosts file" => return String::from("HostsAccess"), // hosts file -> HostsAccess
+        "tex" => return String::from("Tex"),       // tex -> Tex
+        "plpgsql" => return String::from("Plsql"), // plpgsql -> Plsql
+        "tsql" => return String::from("Sql"),      // tsql -> Sql
+        "hiveql" => return String::from("Sql"),    // hiveql -> Sql
+        "glimmer ts" => return String::from("JavaScriptGlimmer"), // glimmer ts -> JavaScriptGlimmer
+        "nushell" => return String::from("Nu"),    // nushell -> Nu
+        "ini" => return String::from("ConfIni"),   // ini -> ConfIni
+        "stringtemplate" => return String::from("Template"), // stringtemplate -> Template
+        "oasv2-json" => return String::from("Json"), // OAS v2 JSON -> Json
+        "oasv2-yaml" => return String::from("Yaml"), // OAS v2 YAML -> Yaml
+        "oasv3-json" => return String::from("Json"), // OAS v3 JSON -> Json
+        "oasv3-yaml" => return String::from("Yaml"), // OAS v3 YAML -> Yaml
+        "java server pages" => return String::from("Jsp"), // java server pages -> Jsp
+        "go template" => return String::from("Gotmpl"), // go template -> Gotmpl
+        "makefile" => return String::from("Make"), // makefile -> Make
 
         // Skip languages that don't exist in FileType enum and have no logical fallback
         "e" | "eclipse" | "ecl" => return String::new(),
         "smalltalk" | "frege" | "newlisp" | "miniyaml" | "reason" => return String::new(),
         "unity3d asset" | "g-code" => return String::new(),
-        "object data instance notation" | "objectscript" | "opencl" | "openedge abl" | "openstep property list" => return String::new(),
-        "pickle" | "picolisp" | "pod 6" | "pov-ray sdl" | "proguard" | "public key" => return String::new(),
-        "q" | "q#" | "qmake" | "qt script" | "quickbasic" | "renderscript" | "rez" => return String::new(),
-        "robotframework" | "rocq prover" | "ros interface" | "rpc" | "runoff" => return String::new(),
-        "sourcepawn" | "stl" | "subrip text" | "survex data" | "tact" | "tl-verilog" => return String::new(),
-        "tsplib data" | "turing" | "type language" | "typespec" | "unix assembly" => return String::new(),
-        "vba" | "vcard" | "visual basic 6.0" | "win32 message file" | "world of warcraft addon data" => return String::new(),
-        "xbase" | "xml property list" | "x pixmap" | "ren'py" | "omnet++ msg" | "omnet++ ned" => return String::new(),
-        "actionscript" | "adblock filter list" | "ags script" | "algol" | "al" => return String::new(),
-        "answer set programming" | "assembly" | "asymptote" | "b4x" | "beef" => return String::new(),
-        "bibtex style" | "bikeshed" | "bitbake" | "blitzbasic" | "bluespec bh" => return String::new(),
+        "object data instance notation"
+        | "objectscript"
+        | "opencl"
+        | "openedge abl"
+        | "openstep property list" => return String::new(),
+        "pickle" | "picolisp" | "pod 6" | "pov-ray sdl" | "proguard" | "public key" => {
+            return String::new();
+        }
+        "q" | "q#" | "qmake" | "qt script" | "quickbasic" | "renderscript" | "rez" => {
+            return String::new();
+        }
+        "robotframework" | "rocq prover" | "ros interface" | "rpc" | "runoff" => {
+            return String::new();
+        }
+        "sourcepawn" | "stl" | "subrip text" | "survex data" | "tact" | "tl-verilog" => {
+            return String::new();
+        }
+        "tsplib data" | "turing" | "type language" | "typespec" | "unix assembly" => {
+            return String::new();
+        }
+        "vba"
+        | "vcard"
+        | "visual basic 6.0"
+        | "win32 message file"
+        | "world of warcraft addon data" => return String::new(),
+        "xbase" | "xml property list" | "x pixmap" | "ren'py" | "omnet++ msg" | "omnet++ ned" => {
+            return String::new();
+        }
+        "actionscript" | "adblock filter list" | "ags script" | "algol" | "al" => {
+            return String::new();
+        }
+        "answer set programming" | "assembly" | "asymptote" | "b4x" | "beef" => {
+            return String::new();
+        }
+        "bibtex style" | "bikeshed" | "bitbake" | "blitzbasic" | "bluespec bh" => {
+            return String::new();
+        }
         "brainfuck" | "brighterscript" | "buildstream" => return String::new(),
         "cool" | "cweb" | "directx 3d file" | "ecmarkup" | "filebench wml" => return String::new(),
         "filterscript" | "freemarker" | "game maker language" | "gap" => return String::new(),
-        "gcc machine description" | "genie" | "gerber image" | "gosu" | "graph modeling language" => return String::new(),
+        "gcc machine description"
+        | "genie"
+        | "gerber image"
+        | "gosu"
+        | "graph modeling language" => return String::new(),
         "gsc" | "hyphy" | "kcl" | "kframework" | "kusto" => return String::new(),
-        "lambdapi" | "lean 4" | "limbo" | "linear programming" | "linker script" => return String::new(),
+        "lambdapi" | "lean 4" | "limbo" | "linear programming" | "linker script" => {
+            return String::new();
+        }
         "linux kernel module" | "livescript" | "logos" | "loomscript" => return String::new(),
         "ltspice symbol" | "m4sugar" | "maxscript" | "mdsvex" | "mercury" => return String::new(),
-        "microsoft developer studio project" | "monkey c" | "motorola 68k assembly" => return String::new(),
+        "microsoft developer studio project" | "monkey c" | "motorola 68k assembly" => {
+            return String::new();
+        }
         "muf" | "nasl" | "ncl" | "nemerle" | "nl" | "nmodl" | "noir" => return String::new(),
 
         _ => {}

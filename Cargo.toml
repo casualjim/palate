@@ -19,6 +19,11 @@ tag = false
 # Add [ci skip] to commit messages to prevent CI triggers
 pre-release-commit-message = "Release {{version}} [ci skip]"
 
+[[bin]]
+name = "codegen"
+path = "src/bin/codegen.rs"
+required-features = ["serde", "palate_polyglot_tokenizer"]
+
 [features]
 default = ["detect"]
 
@@ -45,8 +50,8 @@ classifier = ["detect"]
 [dependencies]
 aho-corasick = { version = "1.0", optional = true }
 casey = "0.4"
+convert_case = "0.10.0"
 infer = "0.19"
-tokio = { version = "1", features = ["fs", "io-util", "rt"], optional = true }
 lazy-regex = { version = "3.0", optional = true }
 once_cell = { version = "1.18", optional = true }
 pcre2 = { version = "0.2", optional = true }
@@ -54,23 +59,18 @@ phf = { version = "0.12.1", features = ["macros"], optional = true }
 phf_codegen = "0.12.1"
 regex = { version = "1.9", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
+serde_norway = "0.9"
 serde_with = { version = "3", optional = true }
 strum = { version = "0.27", features = ["derive", "phf"] }
 strum_macros = "0.27"
-convert_case = "0.10.0"
-serde_norway = "0.9"
+tokio = { version = "1", features = ["fs", "io-util", "rt"], optional = true }
 
 [dependencies.palate_polyglot_tokenizer]
 path = "../hyperpolyglot/crates/palate_polyglot_tokenizer"
 optional = true
 
 [dev-dependencies]
-serde_norway = "0.9"
 serde_json = "1.0"
+serde_norway = "0.9"
 tokio = { version = "1", features = ["macros"] }
 toml = "0.8"
-
-[[bin]]
-name = "codegen"
-path = "src/bin/codegen.rs"
-required-features = ["serde", "palate_polyglot_tokenizer"]
