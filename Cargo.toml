@@ -74,6 +74,7 @@ termcolor = "1.4"
 tokio = { version = "1", features = ["fs", "io-util", "rt"], optional = true }
 
 [dependencies.palate_polyglot_tokenizer]
+version = "0.2.1"
 path = "crates/palate_polyglot_tokenizer"
 optional = true
 
