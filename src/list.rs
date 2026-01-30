@@ -119,7 +119,8 @@ list! {
     Bitbake,
     Blade,
     Blank,
-    Blueprint,
+    #[strum(serialize = "blp")]
+    Blueprint as "blueprint",
     Bp,
     Bpftrace,
     Brighterscript,
@@ -160,7 +161,8 @@ list! {
     Chuck,
     Circom,
     Cl,
-    Clarity,
+    #[strum(serialize = "clar")]
+    Clarity as "clarity",
     Clean,
     Clipper,
     Clojure,
@@ -260,7 +262,8 @@ list! {
     Ejs,
     Elf,
     ELinks,
-    Elisp,
+    #[strum(serialize = "el")]
+    Elisp as "elisp",
     Elixir,
     Elm,
     ElmFilt,
@@ -370,7 +373,8 @@ list! {
     HaskellPersistent,
     Haste,
     HastePreProc,
-    Haxe,
+    #[strum(serialize = "hx")]
+    Haxe as "haxe",
     Hb,
     Hcl,
     Heex,
