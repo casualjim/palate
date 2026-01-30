@@ -696,7 +696,7 @@ const REFERENCE_MAPPING: Record<string, string> = {
   "vdmrt": "Vdmrt",
   "vdmsl": "Vdmsl",
   "vera": "Vera",
-  "verilog": "Verilog",
+  "verilog": "SystemVerilog",
   "verilogams": "Verilogams",
   "vgrindefs": "Vgrindefs",
   "vhdl": "Vhdl",
@@ -1015,9 +1015,10 @@ const MANUAL_OVERRIDES: Record<string, ["static" | "dynamic", string]> = {
   "rpmnew": ["dynamic", "bak"],
   "rush": ["static", "Rush"],
   "ursa": ["static", "Ursa"],
-  "verilog": ["static", "Verilog"],
-  "vh": ["static", "Verilog"],
-  "vlg": ["static", "Verilog"],
+  // Treat Verilog as SystemVerilog (single parser/grammar).
+  "verilog": ["static", "SystemVerilog"],
+  "vh": ["static", "SystemVerilog"],
+  "vlg": ["static", "SystemVerilog"],
   "zir": ["static", "Zir"],
 };
 
@@ -1558,7 +1559,7 @@ const detectReturns: Record<string, Record<string, boolean>> = {
   ttl: { turtle: true, teraterm: true },
   txt: { vimhelp: true, text: true },
   typ: { sql: true, typst: true },
-  v: { v: true, verilog: true, coq: true },
+  v: { v: true, systemverilog: true, coq: true },
   web: { web: true, winbatch: true },
   xfree86: { xf86conf3: true, xf86conf: true },
   xml: { xml: true, docbookxml4: true, docbookxml5: true, xbl: true },

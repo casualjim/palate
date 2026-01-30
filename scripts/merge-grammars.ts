@@ -21,11 +21,27 @@ interface NvimParser {
   name: string;
   url: string;
   filetype: string | null;
+  branch: string | null;
+  location: string | null;
 }
 
 type NvimParserWithCanonical = NvimParser & {
   canonicalUrl: string;
 };
+
+interface GrammarEntry {
+  name: string;
+  repo: string;
+  rev?: string;
+  branch?: string;
+  path?: string;
+  symbol_name?: string;
+  has_rust_bindings?: boolean;
+  cargo_toml_path?: string;
+  highlights_scm_path?: string;
+  highlights_scm_repo?: string;
+  highlights_scm_ref?: string;
+}
 
 // Map from nvim filetype to canonical filetype (what we serialize to)
 const CANONICAL_FILETYPES: Record<string, string> = {
@@ -70,7 +86,14 @@ for (const block of parserBlocks) {
   const filetypeMatch = block.match(/filetype\s*=\s*["']([^"']+)["']/);
   const filetype = filetypeMatch ? filetypeMatch[1] : parserName; // Default to parser name
 
-  nvimParsers.push({ name: parserName, url, filetype });
+  // Optional git ref information in install_info
+  const branchMatch = block.match(/branch\s*=\s*["']([^"']+)["']/);
+  const branch = branchMatch ? branchMatch[1] : null;
+
+  const locationMatch = block.match(/location\s*=\s*["']([^"']+)["']/);
+  const location = locationMatch ? locationMatch[1] : null;
+
+  nvimParsers.push({ name: parserName, url, filetype, branch, location });
 }
 
 console.log(`📝 Loaded ${nvimParsers.length} parsers from nvim-treesitter`);
@@ -161,7 +184,7 @@ for (const parser of nvimParsersWithCanonical) {
 // Resolve canonical URLs for all grammars.json repos concurrently
 console.log("Resolving canonical URLs for grammars.json repos...");
 const grammarsWithCanonical = await Promise.all(
-  grammars.map(async (grammar: { name: string; repo: string }) => ({
+  grammars.map(async (grammar: GrammarEntry) => ({
     ...grammar,
     canonicalUrl: await resolveCanonicalUrl(grammar.repo),
   }))
@@ -226,8 +249,21 @@ const mergedMapping = grammarsWithCanonical.map((grammar) => {
     return {
       grammar: grammarName,
       grammar_repo: canonicalUrl,
+      grammar_repo_raw: repoUrl,
+      grammar_rev: grammar.rev ?? null,
+      grammar_branch: grammar.branch ?? null,
+      grammar_path: grammar.path ?? null,
+      grammar_symbol_name: grammar.symbol_name ?? null,
+      has_rust_bindings: grammar.has_rust_bindings ?? null,
+      cargo_toml_path: grammar.cargo_toml_path ?? null,
+      highlights_scm_path: grammar.highlights_scm_path ?? null,
+      highlights_scm_repo: grammar.highlights_scm_repo ?? null,
+      highlights_scm_ref: grammar.highlights_scm_ref ?? null,
       nvim_parser: nvimParser.name,
       nvim_repo: nvimParser.canonicalUrl,
+      nvim_repo_raw: nvimParser.url,
+      nvim_branch: nvimParser.branch ?? null,
+      nvim_location: nvimParser.location ?? null,
       nvim_filetype: nvimParser.filetype,
       effective_filetype: getEffectiveFiletype(
         nvimParser.filetype,
@@ -242,8 +278,21 @@ const mergedMapping = grammarsWithCanonical.map((grammar) => {
   return {
     grammar: grammarName,
     grammar_repo: canonicalUrl,
+    grammar_repo_raw: repoUrl,
+    grammar_rev: grammar.rev ?? null,
+    grammar_branch: grammar.branch ?? null,
+    grammar_path: grammar.path ?? null,
+    grammar_symbol_name: grammar.symbol_name ?? null,
+    has_rust_bindings: grammar.has_rust_bindings ?? null,
+    cargo_toml_path: grammar.cargo_toml_path ?? null,
+    highlights_scm_path: grammar.highlights_scm_path ?? null,
+    highlights_scm_repo: grammar.highlights_scm_repo ?? null,
+    highlights_scm_ref: grammar.highlights_scm_ref ?? null,
     nvim_parser: null,
     nvim_repo: null,
+    nvim_repo_raw: null,
+    nvim_branch: null,
+    nvim_location: null,
     nvim_filetype: null,
     effective_filetype: grammarName,
     match_type: null,

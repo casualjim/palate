@@ -836,7 +836,7 @@ static DISAMBIGUATIONS: phf::Map<&'static str, &'static [Rule]> = ::phf::Map {
             ".v",
             &[
                 Rule {
-                    languages: &[FileType::Verilog],
+                    languages: &[FileType::SystemVerilog],
                     pattern: Some(Pattern::Positive(
                         "^[ \\t]*module\\s+[^\\s()]+\\s*\\#?\\(|^[ \\t]*`(?:define|ifdef|ifndef|include|timescale|pragma)|^[ \\t]*always[ \\t]*@|^[ \\t]*initial[ \\t]*(begin|@)",
                     )),

@@ -1297,7 +1297,7 @@ fn v(_path: &Path, content: &str) -> Option<FileType> {
     for line in content.lines().take(200) {
         if !line.trim_start().starts_with('/') {
             if regex_is_match!(r";\s*($|/)", line) {
-                return Some(FileType::Verilog);
+                return Some(FileType::SystemVerilog);
             } else if regex_is_match!(r"\.\s*($|\(\*)", line) {
                 return Some(FileType::Coq);
             }

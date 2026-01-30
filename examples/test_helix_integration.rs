@@ -8,7 +8,7 @@ fn main() {
         ("test.sv", FileType::SystemVerilog), // SystemVerilog from Helix
         ("test.svh", FileType::SystemVerilog), // SystemVerilog header from Helix
         ("test.v", FileType::V),              // V language (has priority over Verilog)
-        ("test.vh", FileType::Verilog),       // Verilog header from Helix
+        ("test.vh", FileType::SystemVerilog), // Verilog header from Helix
         // Helix filenames (new from Helix)
         ("APKBUILD", FileType::Apkbuild), // Alpine package build from Helix (dedicated type)
         ("Justfile", FileType::Just),     // Just command runner from Helix

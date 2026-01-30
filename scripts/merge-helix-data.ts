@@ -85,10 +85,10 @@ const enhancedMapping = grammarsMapping.map((entry: any) => {
 
   // Try to match by repository URL
   const grammarRepoId = getRepoId(entry.grammar_repo);
-  for (const [gitUrl, helixData] of Object.entries(helixByRepoUrl)) {
+  for (const [gitUrl, helixEntry] of Object.entries(helixByRepoUrl)) {
     const helixRepoId = getRepoId(gitUrl);
     if (helixRepoId && grammarRepoId === helixRepoId) {
-      const lang = helixData.language;
+      const lang = helixEntry.language;
       if (lang) {
         if (!result.helix_file_types && lang["file-types"]?.length > 0) {
           result.helix_file_types = lang["file-types"];
@@ -100,6 +100,26 @@ const enhancedMapping = grammarsMapping.map((entry: any) => {
           result.helix_language_name = lang.name;
         }
       }
+
+      const grammar = helixEntry.grammar;
+      if (grammar?.source?.git && !result.helix_grammar_git) {
+        result.helix_grammar_git = grammar.source.git;
+        result.helix_grammar_rev = grammar.source.rev ?? null;
+        result.helix_grammar_branch = grammar.source.branch ?? null;
+        result.helix_grammar_subpath = grammar.source.subpath ?? null;
+      }
+    }
+  }
+
+  // Add Helix grammar source details when we have a language name match.
+  // (Helix separates [[language]] and [[grammar]], but grammar entries are keyed by name.)
+  if (result.helix_language_name && !result.helix_grammar_git && helixData.grammar) {
+    const byName = helixData.grammar.find((g: any) => g.name === result.helix_language_name);
+    if (byName?.source?.git) {
+      result.helix_grammar_git = byName.source.git;
+      result.helix_grammar_rev = byName.source.rev ?? null;
+      result.helix_grammar_branch = byName.source.branch ?? null;
+      result.helix_grammar_subpath = byName.source.subpath ?? null;
     }
   }
 
