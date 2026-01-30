@@ -841,7 +841,8 @@ list! {
     Sysml,
     Systemd,
     Systemtap,
-    SystemVerilog,
+    #[strum(serialize = "sv", serialize = "svh")]
+    SystemVerilog as "systemverilog",
     Tablegen,
     Tact,
     Tads,

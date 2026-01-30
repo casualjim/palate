@@ -2035,7 +2035,9 @@ const VARIANT_EXTRA_SERIALIZES: Record<string, string[]> = {
   "CSharp": ["cs"],
   "Diff": ["diff"],
   "Tsx": ["typescriptreact"],
-  "Jsx": ["javascriptreact"]
+  "Jsx": ["javascriptreact"],
+  // Helix uses `sv`/`svh` for SystemVerilog.
+  "SystemVerilog": ["sv", "svh"],
 };
 
 const uniqueVariants = Object.entries(variantToFiletype).sort((a, b) => a[1].localeCompare(b[1]));

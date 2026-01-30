@@ -301,10 +301,7 @@ fn comp(_path: &Path, content: &str) -> Option<FileType> {
     // `.comp` is ambiguous (GLSL compute shader vs Mason component).
     // Prefer Mason when we see clear templating markers, otherwise default to GLSL.
     let head = get_lines(content, 80);
-    if regex_is_match!(
-        r"(<%|</%|<%args>|<%init>|<%perl>|<%once>|<%def\b)"i,
-        head
-    ) {
+    if regex_is_match!(r"(<%|</%|<%args>|<%init>|<%perl>|<%once>|<%def\b)"i, head) {
         return Some(FileType::Mason);
     }
     Some(FileType::Glsl)

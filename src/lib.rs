@@ -62,7 +62,10 @@ mod tests {
     #[test]
     fn ts_extension_prefers_typescript() {
         let typescript = "export const x: number = 1;\nconsole.log(x)\n";
-        assert_eq!(FileType::TypeScript, detect(Path::new("main.ts"), typescript));
+        assert_eq!(
+            FileType::TypeScript,
+            detect(Path::new("main.ts"), typescript)
+        );
     }
 
     #[test]

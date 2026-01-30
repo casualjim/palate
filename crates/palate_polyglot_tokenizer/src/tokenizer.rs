@@ -676,7 +676,7 @@ mod tests {
     fn html_comment() {
         let sample = r#"
         <!-- Comment Here-->
-        <!-- 
+        <!--
          Multi line
          Comment
          -->

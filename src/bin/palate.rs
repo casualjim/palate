@@ -1,11 +1,11 @@
 use clap::{Arg, Command};
+use ignore::WalkBuilder;
 use std::{
     collections::HashMap,
     fs::File,
     io::{self, BufRead, Read, Write},
     path::{Path, PathBuf},
 };
-use ignore::WalkBuilder;
 
 use palate::{FileType, is_text_file, try_detect};
 
@@ -34,7 +34,7 @@ fn main() {
         data.paths.sort();
     }
 
-    if let Err(_) = print_tokei_lite(&language_stats) {
+    if print_tokei_lite(&language_stats).is_err() {
         std::process::exit(1);
     }
 }
@@ -116,7 +116,7 @@ fn read_file_content(path: &Path) -> String {
     String::from_utf8_lossy(&buffer).into_owned()
 }
 
-fn print_tokei_lite(language_stats: &Vec<(FileType, LanguageStats)>) -> Result<(), io::Error> {
+fn print_tokei_lite(language_stats: &[(FileType, LanguageStats)]) -> Result<(), io::Error> {
     let mut rows: Vec<(&'static str, usize, u64, u64)> = Vec::new(); // (lang, files, lines, blanks)
     let mut total_files = 0usize;
     let mut total_lines = 0u64;
