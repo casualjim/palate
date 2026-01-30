@@ -839,6 +839,7 @@ pub(crate) static PATTERN: Lazy<Vec<(bool, &'static Regex, Pattern)>> = Lazy::ne
         (false, regex!(r"^.*SConscript$").deref(), Pattern::new(FileTypeResolver::Static(FileType::Python), None)),
         (false, regex!(r"^.*sconstruct$").deref(), Pattern::new(FileTypeResolver::Static(FileType::Python), None)),
         (false, regex!(r"^BUILD\..*$").deref(), Pattern::new(FileTypeResolver::Static(FileType::Bzl), None)),
+        (true, regex!(r"^.*systemd/.*/[^/]*\.conf$").deref(), Pattern::new(FileTypeResolver::Static(FileType::Systemd), None)),
         (false, regex!(r"^.*\.todo\.txt$").deref(), Pattern::new(FileTypeResolver::Static(FileType::Todotxt), None)),
         (true, regex!(r"^.*containers\.conf\.d/[^/]*\.conf$").deref(), Pattern::new(FileTypeResolver::Static(FileType::Toml), None)),
         (true, regex!(r"^.*containers\.conf\.modules/[^/]*\.conf$").deref(), Pattern::new(FileTypeResolver::Static(FileType::Toml), None)),
