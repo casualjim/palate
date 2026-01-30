@@ -1,4 +1,5 @@
 use clap::{Arg, Command};
+use infer::{Infer, MatcherType};
 use ignore::WalkBuilder;
 use std::{
     collections::HashMap,
@@ -7,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use palate::{FileType, is_text_file, try_detect};
+use palate::{FileType, detect, is_text_file, try_detect};
 
 const MAX_CONTENT_SIZE_BYTES: usize = 51_200;
 
@@ -27,6 +28,18 @@ fn main() {
         .unwrap_or(".");
     let root = Path::new(path);
 
+    if !root.exists() {
+        eprintln!("palate: {}: No such file or directory", root.display());
+        std::process::exit(2);
+    }
+
+    if root.is_file() {
+        if print_file_like(root).is_err() {
+            std::process::exit(1);
+        }
+        return;
+    }
+
     let mut stats = scan_language_stats(root, false, true);
     let mut language_stats: Vec<(FileType, LanguageStats)> = stats.drain().collect();
     language_stats.sort_by(|(_, a), (_, b)| b.files.cmp(&a.files));
@@ -36,6 +49,65 @@ fn main() {
 
     if print_tokei_lite(&language_stats).is_err() {
         std::process::exit(1);
+    }
+}
+
+fn print_file_like(path: &Path) -> io::Result<()> {
+    let infer = Infer::new();
+    let inferred = infer.get_from_path(path).ok().flatten();
+
+    if let Some(kind) = inferred {
+        if kind.matcher_type() != MatcherType::Text {
+            writeln!(io::stdout(), "{}: {}", path.display(), kind.mime_type())?;
+            return Ok(());
+        }
+    } else if !is_text_file(path) {
+        writeln!(io::stdout(), "{}: data", path.display())?;
+        return Ok(());
+    }
+
+    let content = read_file_content(path);
+    let file_type = detect(path, &content);
+    let name = file_type_name(file_type);
+
+    let (lines, blanks) = count_lines_and_blanks(path)?;
+    let code = lines.saturating_sub(blanks);
+
+    let mime = inferred
+        .as_ref()
+        .map(|kind| kind.mime_type())
+        .unwrap_or("text/plain");
+    let size = std::fs::metadata(path).map(|m| m.len()).ok();
+    let size = size.map(format_bytes);
+
+    let mut extra: Vec<String> = Vec::new();
+    extra.push(format!("mime {mime}"));
+    if let Some(size) = size {
+        extra.push(size);
+    }
+    extra.push(format!("lines {lines}, code {code}, blanks {blanks}"));
+
+    writeln!(
+        io::stdout(),
+        "{}: {} ({})",
+        path.display(),
+        name,
+        extra.join(", ")
+    )?;
+
+    Ok(())
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = 1024.0 * 1024.0;
+    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
+
+    match bytes {
+        0..=1023 => format!("{bytes}B"),
+        _ if (bytes as f64) < MIB => format!("{:.1}KiB", (bytes as f64) / KIB),
+        _ if (bytes as f64) < GIB => format!("{:.1}MiB", (bytes as f64) / MIB),
+        _ => format!("{:.1}GiB", (bytes as f64) / GIB),
     }
 }
 
