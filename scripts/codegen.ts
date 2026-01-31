@@ -1035,6 +1035,12 @@ const MANUAL_OVERRIDES: Record<string, ["static" | "dynamic", string]> = {
   "zir": ["static", "Zir"],
 };
 
+for (const [ext, [kind, target]] of Object.entries(MANUAL_OVERRIDES)) {
+  if (kind === "dynamic" && !isDetectFunctionAvailable(target)) {
+    throw new Error(`MANUAL_OVERRIDES has dynamic entry for "${ext}" -> detect::${target}, but it is not available`);
+  }
+}
+
 /**
  * Manual filename overrides from the reference implementation.
  *
@@ -2002,6 +2008,18 @@ for (const ft of Object.keys(REFERENCE_MAPPING)) {
 // Sort filetypes alphabetically and build variant mapping
 // ============================================================================
 const filetypeList = Array.from(filetypes).sort();
+
+// Sanity check: manual extension keys should never become filetypes/variants unless they are
+// also known filetype strings from our ground-truth mappings.
+const leakedManualExtensions = Object.keys(MANUAL_OVERRIDES).filter(
+  (ext) => filetypes.has(ext) && !REFERENCE_MAPPING[ext] && !variantByFiletype[ext],
+);
+if (leakedManualExtensions.length > 0) {
+  throw new Error(
+    `Manual extension keys leaked into enum filetypes: ${leakedManualExtensions.join(", ")}. ` +
+      `This would generate bogus FileType variants (e.g. "Ejs").`,
+  );
+}
 
 const ftToVariant: Record<string, string> = {};
 for (const ft of filetypeList) {
