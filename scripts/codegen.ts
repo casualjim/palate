@@ -1015,6 +1015,19 @@ const MANUAL_OVERRIDES: Record<string, ["static" | "dynamic", string]> = {
   "rpmnew": ["dynamic", "bak"],
   "rush": ["static", "Rush"],
   "ursa": ["static", "Ursa"],
+  // Systemd unit files: treat as Systemd even though the grammar is remapped elsewhere.
+  "service": ["static", "Systemd"],
+  "automount": ["static", "Systemd"],
+  "device": ["static", "Systemd"],
+  "mount": ["static", "Systemd"],
+  "nspawn": ["static", "Systemd"],
+  "path": ["static", "Systemd"],
+  "scope": ["static", "Systemd"],
+  "slice": ["static", "Systemd"],
+  "socket": ["static", "Systemd"],
+  "swap": ["static", "Systemd"],
+  "target": ["static", "Systemd"],
+  "timer": ["static", "Systemd"],
   // Treat Verilog as SystemVerilog (single parser/grammar).
   "verilog": ["static", "SystemVerilog"],
   "vh": ["static", "SystemVerilog"],
@@ -1082,6 +1095,9 @@ const MANUAL_PATTERNS: ManualPatternEntry[] = [
   ["^.*\\.git/.*$", "dynamic", "git", -1, true],
   ["^.*\\.[Ll][Oo][Gg]$", "dynamic", "log", undefined, true],
   ["^.+~$", "dynamic", "tmp", undefined, false],
+  // systemd drop-ins and related conf files.
+  ["^.*systemd/[^/]*\\.conf$", "static", "Systemd", undefined, true],
+  ["^.*systemd/.*/[^/]*\\.conf$", "static", "Systemd", undefined, true],
   ...TFT_ONLY_PATTERNS,
 ];
 
@@ -1097,12 +1113,8 @@ const filenameEntries: Array<[string, string, string]> = [];
 const seenExtensions = new Set<string>();
 const seenFilenames = new Set<string>();
 
-// Add manual override filetypes to ensure they're included in the enum
-for (const [key, [type, value]] of Object.entries(MANUAL_OVERRIDES)) {
-  if (type === "static") {
-    filetypes.add(key);
-  }
-  // Track manual overrides to avoid duplicates from source data
+// Track manual extension overrides to avoid duplicates from source data
+for (const key of Object.keys(MANUAL_OVERRIDES)) {
   seenExtensions.add(key);
 }
 
