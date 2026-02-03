@@ -1,9 +1,9 @@
-//! Heuristics-based detection using PCRE2 regex patterns from hyperpolyglot.
+//! Heuristics-based detection using regex patterns from hyperpolyglot.
 //!
 //! This module provides disambiguation rules for file extensions that map to
 //! multiple possible languages. It uses the regex patterns defined in heuristics.yml.
 
-use pcre2::bytes::RegexBuilder as PCRERegex;
+use fancy_regex::RegexBuilder;
 use std::path::Path;
 
 use crate::FileType;
@@ -29,20 +29,16 @@ impl Pattern {
     fn matches(&self, content: &str) -> bool {
         match self {
             Pattern::Positive(pattern) => {
-                let regex = PCRERegex::new()
-                    .crlf(true)
-                    .multi_line(true)
-                    .build(pattern)
+                let regex = RegexBuilder::new(&format!("(?m){pattern}"))
+                    .build()
                     .unwrap();
-                regex.is_match(content.as_bytes()).unwrap_or(false)
+                regex.is_match(content).unwrap_or(false)
             }
             Pattern::Negative(pattern) => {
-                let regex = PCRERegex::new()
-                    .crlf(true)
-                    .multi_line(true)
-                    .build(pattern)
+                let regex = RegexBuilder::new(&format!("(?m){pattern}"))
+                    .build()
                     .unwrap();
-                !regex.is_match(content.as_bytes()).unwrap_or(true)
+                !regex.is_match(content).unwrap_or(true)
             }
             Pattern::Or(patterns) => patterns.iter().any(|pattern| pattern.matches(content)),
             Pattern::And(patterns) => patterns.iter().all(|pattern| pattern.matches(content)),

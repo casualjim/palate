@@ -40,7 +40,7 @@ detect = [
     "dep:once_cell",
     "dep:phf",
     "dep:regex",
-    "dep:pcre2",
+    "dep:fancy-regex",
 ]
 
 ## Enable the local-only `codegen` binary (`src/bin/codegen.rs`).
@@ -51,7 +51,7 @@ codegen = [
     "dep:phf_codegen",
     "dep:serde",
     "dep:serde_norway",
-    "dep:pcre2",
+    "dep:fancy-regex",
     "dep:palate_polyglot_tokenizer",
 ]
 
@@ -73,7 +73,7 @@ ignore = "0.4"
 infer = "0.19"
 lazy-regex = { version = "3.0", optional = true }
 once_cell = { version = "1.18", optional = true }
-pcre2 = { version = "0.2", optional = true }
+fancy-regex = { version = "0.14", optional = true }
 phf = { version = "0.12.1", features = ["macros"], optional = true }
 phf_codegen = { version = "0.12.1", optional = true }
 regex = { version = "1.9", optional = true }
