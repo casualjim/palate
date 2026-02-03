@@ -1,6 +1,20 @@
-use pcre2::bytes::Regex as PCRERegex;
+use fancy_regex::RegexBuilder;
 use phf_codegen::Map as PhfMap;
 use serde::Deserialize;
+
+/// Convert PCRE2-style `\g<name>` backreferences to fancy-regex `\k<name>` syntax.
+fn translate_pcre2_to_fancy_regex(pattern: &str) -> String {
+    // Replace \g<name> with \k<name> for fancy-regex compatibility
+    pattern.replace(r#"\g<"#, r#"\k<"#)
+}
+
+fn validate_fancy_regex(pattern: &str) -> Result<(), fancy_regex::Error> {
+    // Runtime matching uses multiline mode; validate patterns with the same semantics
+    // to ensure codegen fails fast when Linguist introduces syntax we can't run.
+    RegexBuilder::new(&format!("(?m){pattern}"))
+        .build()
+        .map(|_| ())
+}
 use std::{
     collections::HashMap,
     fs::{self, File},
@@ -97,15 +111,19 @@ impl PatternDTO {
     fn to_domain_object_code(&self, named_patterns: &NamedPatterns) -> String {
         match self {
             PatternDTO::Positive(MaybeMany::One(pattern)) => {
+                // Translate PCRE2 syntax to fancy-regex syntax
+                let pattern = translate_pcre2_to_fancy_regex(pattern);
                 // Panic on invalid regex now so we can unwrap in lib
-                if let Err(e) = PCRERegex::new(pattern) {
+                if let Err(e) = validate_fancy_regex(&pattern) {
                     panic!("Invalid regex pattern: {}\n{}", pattern, e);
                 }
                 format!("Pattern::Positive({:?})", pattern)
             }
             PatternDTO::Negative(pattern) => {
+                // Translate PCRE2 syntax to fancy-regex syntax
+                let pattern = translate_pcre2_to_fancy_regex(pattern);
                 // Panic on invalid regex now so we can unwrap in lib
-                if let Err(e) = PCRERegex::new(pattern) {
+                if let Err(e) = validate_fancy_regex(&pattern) {
                     panic!("Invalid regex pattern: {}\n{}", pattern, e);
                 }
                 format!("Pattern::Negative({:?})", pattern)
@@ -162,6 +180,10 @@ const MAX_TOKEN_BYTES: usize = 32;
 fn main() {
     let heuristics: Heuristics =
         serde_norway::from_str(&fs::read_to_string(HEURISTICS_SOURCE_FILE).unwrap()[..]).unwrap();
+
+    // Validate all regex patterns before generating code
+    validate_all_patterns(&heuristics);
+
     create_disambiguation_heuristics_map(heuristics);
 
     // Only train classifier if samples directory exists
@@ -170,6 +192,83 @@ fn main() {
     } else {
         println!("Note: Skipping classifier training - 'samples' directory not found");
         println!("      Copy/link samples from hyperpolyglot to enable classifier training");
+    }
+}
+
+/// Validate all regex patterns in the heuristics file.
+/// This ensures all patterns compile with fancy-regex before generating code.
+fn validate_all_patterns(heuristics: &Heuristics) {
+    let mut pattern_count = 0usize;
+
+    // Validate all disambiguation patterns
+    for dis in &heuristics.disambiguations {
+        for rule in &dis.rules {
+            if let Some(pattern) = &rule.pattern {
+                validate_pattern_dto(pattern, &heuristics.named_patterns, &mut pattern_count);
+            }
+        }
+    }
+
+    // Validate all named patterns
+    for (name, pattern) in &heuristics.named_patterns {
+        match pattern {
+            MaybeMany::One(p) => {
+                let translated = translate_pcre2_to_fancy_regex(p);
+                if let Err(e) = validate_fancy_regex(&translated) {
+                    panic!("Invalid named pattern '{}': {}\n{}", name, translated, e);
+                }
+                pattern_count += 1;
+            }
+            MaybeMany::Many(patterns) => {
+                for p in patterns {
+                    let translated = translate_pcre2_to_fancy_regex(p);
+                    if let Err(e) = validate_fancy_regex(&translated) {
+                        panic!("Invalid named pattern '{}': {}\n{}", name, translated, e);
+                    }
+                    pattern_count += 1;
+                }
+            }
+        }
+    }
+
+    println!("✓ Validated {} regex patterns with fancy-regex", pattern_count);
+}
+
+fn validate_pattern_dto(
+    pattern: &PatternDTO,
+    named_patterns: &NamedPatterns,
+    count: &mut usize,
+) {
+    match pattern {
+        PatternDTO::Positive(MaybeMany::One(p)) | PatternDTO::Negative(p) => {
+            let translated = translate_pcre2_to_fancy_regex(p);
+            if let Err(e) = validate_fancy_regex(&translated) {
+                panic!("Invalid regex pattern: {}\n{}", translated, e);
+            }
+            *count += 1;
+        }
+        PatternDTO::Positive(MaybeMany::Many(patterns)) => {
+            for p in patterns {
+                validate_pattern_dto(
+                    &PatternDTO::Positive(MaybeMany::One(p.clone())),
+                    named_patterns,
+                    count,
+                );
+            }
+        }
+        PatternDTO::And(patterns) => {
+            for p in patterns {
+                validate_pattern_dto(p, named_patterns, count);
+            }
+        }
+        PatternDTO::Named(name) => {
+            if let Some(pattern) = named_patterns.get(name) {
+                let dto = PatternDTO::Positive(pattern.clone());
+                validate_pattern_dto(&dto, named_patterns, count);
+            } else {
+                panic!("Named pattern '{}' not found", name);
+            }
+        }
     }
 }
 
