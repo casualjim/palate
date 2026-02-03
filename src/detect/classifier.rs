@@ -61,11 +61,25 @@ pub(crate) fn classify(content: &str) -> Option<FileType> {
         }
     }
 
-    // Return the language with the highest score
-    scores
-        .into_iter()
-        .max_by_key(|&(_, score)| score)
-        .map(|(ft, _)| ft)
+    // Return the language with the highest score.
+    //
+    // Tie-break deterministically so results don't depend on HashMap iteration order.
+    let mut best: Option<(FileType, i32)> = None;
+    for (ft, score) in scores.into_iter() {
+        match best {
+            None => best = Some((ft, score)),
+            Some((best_ft, best_score)) => {
+                let ft_name: &'static str = ft.into();
+                let best_name: &'static str = best_ft.into();
+                let choose = score > best_score
+                    || (score == best_score && ft_name < best_name);
+                if choose {
+                    best = Some((ft, score));
+                }
+            }
+        }
+    }
+    best.map(|(ft, _)| ft)
 }
 
 /// Simple tokenizer that extracts identifiers and keywords.

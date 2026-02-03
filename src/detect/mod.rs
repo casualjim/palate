@@ -81,6 +81,275 @@ pub fn try_detect(path: impl AsRef<Path>, content: &str) -> Option<FileType> {
         }
     }
 
+    // Compound extension (e.g. `foo.js.erb`, `terraform.tfstate.backup`, `sample.axi.erb`).
+    //
+    // Neovim's "extension" table includes a small number of dotted keys that are
+    // not representable via `Path::extension()` (which only returns the last segment).
+    // We reconstruct these candidates from the filename and try the extension map.
+    if let Some(filename) = path.file_name().and_then(|os_name| os_name.to_str()) {
+        let filename = filename.to_ascii_lowercase();
+        let parts: Vec<&str> = filename.split('.').filter(|s| !s.is_empty()).collect();
+        if parts.len() >= 2 {
+            let max = parts.len().min(5);
+            for n in (2..=max).rev() {
+                let start = parts.len() - n;
+                let key = parts[start..].join(".");
+                if let Some(resolver) = FILE_EXTENSION.get(key.as_str()) {
+                    if let Some(ft) = resolver.resolve(path, content) {
+                        return Some(ft);
+                    }
+                }
+            }
+        }
+    }
+
+    // Early, content-based disambiguation for a few high-conflict extensions where
+    // the generic heuristics table isn't precise enough.
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        let ext = ext.to_ascii_lowercase();
+        match ext.as_str() {
+            // `.h` is ambiguous; prefer C++ for most headers unless Objective-C markers are present.
+            "h" => return header(path, content),
+            // `.spec` is ambiguous (RPM vs python/ruby "spec" scripts).
+            "spec" => {
+                let head = get_lines(content, 120);
+                if regex_is_match!(r"(?m)^\s*\w+\s*=\s*Analysis\s*\(", head)
+                    || regex_is_match!(r"(?m)^\s*from\s+\w+\s+import\s+\w+", head)
+                    || regex_is_match!(r"(?m)^\s*import\s+\w+", head)
+                {
+                    return Some(FileType::Python);
+                }
+                if regex_is_match!(r"(?m)^\s*describe\b", head) && head.contains("require") {
+                    return Some(FileType::Ruby);
+                }
+            }
+            // `.t` is used by multiple ecosystems (Terra, Raku tests, others).
+            "t" => {
+                let head = get_lines(content, 200);
+                if regex_is_match!(r"(?mi)^\s*terra\b|\bterralib\b", head) {
+                    return Some(FileType::Terra);
+                }
+                // Raku markers in tests.
+                if regex_is_match!(r"(?mi)^\s*use\s+v6\s*;", head)
+                    || regex_is_match!(r"(?mi)\bis\s+copy\b", head)
+                    || regex_is_match!(r"(?m)->\s*\$\w+", head)
+                    || regex_is_match!(r"(?m)^\\s*#\\s*vim:\\s*ft=perl6\\b", content)
+                {
+                    return Some(FileType::Raku);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Heuristics (hyperpolyglot): disambiguate extensions via content.
+    //
+    // This runs before Neovim-style patterns so it can override extension-like
+    // patterns (e.g. `^.*\\.[Mm][Oo][Dd]$`) when content indicates a different
+    // language.
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        let ext = ext.to_ascii_lowercase();
+        let dotted_extension = format!(".{ext}");
+        if let Some(ft) = heuristics::apply_heuristics(&dotted_extension, path, content) {
+            return Some(ft);
+        }
+    }
+
+    // Content-based disambiguation for a few high-conflict extensions where Neovim defaults
+    // are not reliable for our use-case.
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        let ext = ext.to_ascii_lowercase();
+        match ext.as_str() {
+            // `.sch` is extremely overloaded (Eagle, KiCad, XML schematron/schema, Scheme...).
+            // Use a few cheap content checks to disambiguate.
+            "sch" => {
+                if let Some(first) = util::next_non_blank(content, 0) {
+                    let first = first.trim_start();
+                    if first.starts_with("EESchema") {
+                        return Some(FileType::EeschemaSchematic);
+                    }
+                    if first.starts_with("<?xml") || first.starts_with('<') {
+                        let head = get_lines(content, 20);
+                        if regex_is_match!(r"(?mi)<!DOCTYPE\s+eagle\b|<\s*eagle\b", head) {
+                            return Some(FileType::Eagle);
+                        }
+                        return Some(FileType::Xml);
+                    }
+                    if first.starts_with('(') {
+                        return Some(FileType::Scheme);
+                    }
+                    // Scheme files can start with `;` comment blocks before the first form.
+                    if first.starts_with(';') {
+                        for line in content.lines().take(200) {
+                            let line = line.trim_start();
+                            if line.is_empty() || line.starts_with(';') {
+                                continue;
+                            }
+                            if line.starts_with('(') {
+                                return Some(FileType::Scheme);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            // KiCad legacy boards.
+            "brd" => {
+                if regex_is_match!(r"(?m)^\s*PCBNEW-BOARD\b", get_lines(content, 3)) {
+                    return Some(FileType::KicadLegacyLayout);
+                }
+            }
+            // Limbo source (Plan 9 / Inferno) vs Brainfuck `.b`.
+            "b" => {
+                if regex_is_match!(r"(?m)^\s*implement\s+\w+\s*;", get_lines(content, 5)) {
+                    return Some(FileType::Limbo);
+                }
+            }
+            // Scheme library files vs Salt SLS.
+            "sls" => {
+                if let Some(first) = util::next_non_blank(content, 0) {
+                    if first.trim_start().starts_with('(') {
+                        return Some(FileType::Scheme);
+                    }
+                }
+            }
+            // macOS `.command` scripts are shell scripts without a shebang.
+            "command" => return Some(FileType::Sh),
+            // SourcePawn is a common conflict for `.sp` (Spice).
+            "sp" => {
+                if regex_is_match!(
+                    r"(?mi)^\s*#\s*include\s*<sourcemod>\b|^\s*public\s+Plugin:",
+                    get_lines(content, 80)
+                ) {
+                    return Some(FileType::Sourcepawn);
+                }
+            }
+            // `.fcgi` is frequently used for FastCGI wrappers; disambiguate by content.
+            "fcgi" => {
+                if util::find(content, 10, false, "<?php") {
+                    return Some(FileType::Php);
+                }
+            }
+            // `.spec` is ambiguous (RPM spec vs various project “spec” scripts).
+            "spec" => {
+                let head = get_lines(content, 120);
+                // PyInstaller spec files are Python.
+                if regex_is_match!(r"(?m)^\s*\w+\s*=\s*Analysis\s*\(", head)
+                    || regex_is_match!(r"(?m)^\s*from\\s+\\w+\\s+import\\s+\\w+", head)
+                {
+                    return Some(FileType::Python);
+                }
+                // RSpec / Ruby spec files are Ruby.
+                if regex_is_match!(r"(?m)^\s*describe\\b", head) && head.contains("require") {
+                    return Some(FileType::Ruby);
+                }
+            }
+            // `.shader` is ambiguous (Godot shaders vs plain GLSL).
+            "shader" => {
+                let head = get_lines(content, 60);
+                if regex_is_match!(r"(?mi)^\s*#\s*version\b", head) {
+                    return Some(FileType::Glsl);
+                }
+                if regex_is_match!(r"(?mi)^\s*shader_type\b", head) {
+                    return Some(FileType::GdShader);
+                }
+            }
+            // `.gs` is ambiguous (Google Apps Script vs GrADS).
+            "gs" => {
+                let head = get_lines(content, 120);
+                // Prefer JavaScript when the content looks like JS / Apps Script.
+                if regex_is_match!(r"(?m)\b(function|var|let|const)\b", head)
+                    && (head.contains('{') || head.contains("=>"))
+                {
+                    return Some(FileType::JavaScript);
+                }
+            }
+            // `.frag` is ambiguous (GLSL fragments vs “.js.frag” concatenation snippets).
+            "frag" => {
+                let head = get_lines(content, 80);
+                if regex_is_match!(r"(?mi)^\s*#\s*version\b", head)
+                    || regex_is_match!(r"(?mi)^\s*(uniform|varying|precision)\b", head)
+                    || regex_is_match!(r"(?mi)\bvoid\s+main\s*\(", head)
+                {
+                    return Some(FileType::Glsl);
+                }
+                if regex_is_match!(r"(?m)^\s*\(function\b|^\s*function\b", head)
+                    || head.contains("window")
+                    || head.contains("angular")
+                {
+                    return Some(FileType::JavaScript);
+                }
+            }
+            // PLSQL package headers/bodies are commonly stored as `.pks`/`.pkb`.
+            "pks" | "pkb" => return Some(FileType::Plsql),
+            // XML-ish extension buckets that are sometimes mapped to other config languages.
+            "workflow" | "pluginspec" => {
+                if regex_is_match!(r"(?m)^\s*<\?xml\b|^\s*<", get_lines(content, 5)) {
+                    return Some(FileType::Xml);
+                }
+            }
+            // `.t` is handled by the early disambiguation block.
+            // Wolfram notebooks (`.nb`) are text-based but are sometimes used as generic
+            // "notebook"/notes extensions in the wild. Prefer Mma only when the content
+            // clearly looks like a Wolfram notebook; otherwise treat as plain text.
+            "nb" | "nbp" => {
+                let first = util::next_non_blank(content, 0).unwrap_or("");
+                if first.trim_start().starts_with("(*")
+                    || regex_is_match!(r"(?m)^\s*Notebook\s*\[", get_lines(content, 40))
+                {
+                    return Some(FileType::Mma);
+                }
+                return Some(FileType::Text);
+            }
+            _ => {}
+        }
+    }
+
+    if path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("vhost"))
+        && regex_is_match!(r"(?m)^\s*server\s*\{", get_lines(content, 20))
+    {
+        return Some(FileType::Nginx);
+    }
+
+    if path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("j"))
+        && regex_is_match!(
+            r"(?mi)^\s*@(?:import|implementation|interface|protocol|end)\b",
+            get_lines(content, 50)
+        )
+    {
+        return Some(FileType::ObjJ);
+    }
+
+    if path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("gi"))
+        && regex_is_match!(
+            r"(?m)\b(?:InstallMethod|InstallGlobalFunction|TryNextMethod|DeclareOperation)\b",
+            get_lines(content, 120)
+        )
+    {
+        return Some(FileType::Gap);
+    }
+
+    if path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("cp"))
+        && regex_is_match!(
+            r"(?mi)^\s*(?:module|import)\b",
+            get_lines(content, 50)
+        )
+    {
+        return Some(FileType::ComponentPascal);
+    }
+
     // patterns (non-negative priority)
     let mut negative_prio_start_index = 0;
     for (index, (match_full_path, regex, pat)) in PATTERN.iter().enumerate() {
@@ -101,17 +370,6 @@ pub fn try_detect(path: impl AsRef<Path>, content: &str) -> Option<FileType> {
         }
     }
 
-    // file extension
-    if let Some(resolver) = path
-        .extension()
-        .and_then(|os_ext| os_ext.to_str())
-        .and_then(|ext| FILE_EXTENSION.get(ext))
-    {
-        if let Some(ft) = resolver.resolve(path, content) {
-            return Some(ft);
-        }
-    }
-
     // patterns (negative priority)
     for (match_full_path, regex, pat) in PATTERN.iter().skip(negative_prio_start_index) {
         if match match_full_path {
@@ -127,19 +385,12 @@ pub fn try_detect(path: impl AsRef<Path>, content: &str) -> Option<FileType> {
         }
     }
 
-    // Try heuristics for ambiguous extensions (before file extension resolvers)
-    // This allows PCRE2 patterns to disambiguate extensions like .h, .cs, .e
-    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-        if let Some(ft) = heuristics::apply_heuristics(ext, path, content) {
-            return Some(ft);
-        }
-    }
-
-    // file extension (resolvers like header, euphoria, etc.)
+    // file extension
     if let Some(resolver) = path
         .extension()
         .and_then(|os_ext| os_ext.to_str())
-        .and_then(|ext| FILE_EXTENSION.get(ext))
+        .map(|ext| ext.to_ascii_lowercase())
+        .and_then(|ext| FILE_EXTENSION.get(ext.as_str()))
     {
         if let Some(ft) = resolver.resolve(path, content) {
             return Some(ft);
@@ -239,6 +490,22 @@ fn btm(_path: &Path, _content: &str) -> Option<FileType> {
 
 fn cfg(_path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred cfg filetype
+    // HAProxy configs are typically `.cfg` and start with blocks like:
+    // `global`, `defaults`, `frontend`, `backend`, `listen`.
+    if regex_is_match!(r"(?mi)^\s*(global|defaults|frontend|backend|listen)\b", get_lines(content, 50))
+    {
+        return Some(FileType::Haproxy);
+    }
+
+    // INI-style configs are commonly stored as `.cfg`.
+    // Detect them before falling back to a generic "cfg" bucket.
+    let head = get_lines(content, 120);
+    if regex_is_match!(r"(?m)^\s*\[[^\]]+\]\s*$", head)
+        || regex_is_match!(r"(?m)^\s*[A-Za-z0-9_.-]+\s*=", head)
+    {
+        return Some(FileType::ConfIni);
+    }
+
     match regex_is_match!(r"(eio|mmc|moc|proc|sio|sys):cfg"i, get_lines(content, 1)) {
         true => Some(FileType::Rapid),
         false => Some(FileType::Cfg),
@@ -248,6 +515,13 @@ fn cfg(_path: &Path, content: &str) -> Option<FileType> {
 fn change(_path: &Path, content: &str) -> Option<FileType> {
     if regex_is_match!(r"^(#|!)", get_lines(content, 1)) {
         return Some(FileType::Ch);
+    }
+    // Charity sources commonly start with `%` line comments and use `data ... -> ...` syntax.
+    if regex_is_match!(r"(?m)^\s*%\s*", get_lines(content, 5))
+        && regex_is_match!(r"(?mi)^\s*data\s+\w", get_lines(content, 50))
+        && content.contains("->")
+    {
+        return Some(FileType::Charity);
     }
     for line in content.lines().take(10) {
         if line.starts_with('@') {
@@ -285,6 +559,11 @@ fn cls(_path: &Path, content: &str) -> Option<FileType> {
         Some(FileType::Rexx)
     } else if first_line == "VERSION 1.0 CLASS" {
         Some(FileType::Vb)
+    } else if regex_is_match!(
+        r"(?mi)^\s*(global|public|private|protected)\s+(with\s+sharing\s+)?(class|interface|enum)\b",
+        get_lines(content, 120)
+    ) || regex_is_match!(r"(?m)\btrigger\s+\w+\s+on\s+\w+\s*\(", get_lines(content, 200)) {
+        Some(FileType::Apex)
     } else {
         Some(FileType::St)
     }
@@ -459,7 +738,7 @@ fn e(_path: &Path, content: &str) -> Option<FileType> {
 fn edn(_path: &Path, content: &str) -> Option<FileType> {
     match regex_is_match!(r"^\s*\(\s*edif\b"i, get_lines(content, 1)) {
         true => Some(FileType::Edif),
-        false => Some(FileType::Clojure),
+        false => Some(FileType::Edn),
     }
 }
 
@@ -537,9 +816,26 @@ fn git(_path: &Path, content: &str) -> Option<FileType> {
 
 fn header(_path: &Path, content: &str) -> Option<FileType> {
     for line in content.lines().take(200) {
-        if regex_is_match!(r"^@(interface|end|class)"i, line) {
+        let trimmed = line.trim_start();
+
+        // Objective-C markers (include `@protocol` and `@class`) and `#import`.
+        if trimmed.starts_with("#import")
+            || regex_is_match!(r"^@(interface|protocol|end|class)\b"i, trimmed)
+        {
             // TODO: allow setting C or C++
             return Some(FileType::ObjC);
+        }
+
+        // Skip ObjC directives when looking for C++ keywords.
+        if trimmed.starts_with('@') {
+            continue;
+        }
+
+        if regex_is_match!(r"^\s*(namespace|template)\b"i, line)
+            || regex_is_match!(r"\b(constexpr|nullptr)\b", line)
+            || line.contains("std::")
+        {
+            return Some(FileType::Cpp);
         }
     }
     // TODO: user defined preferred header filetype
@@ -594,6 +890,55 @@ static PASCAL_COMMENTS: Lazy<Regex> = lazy_regex!(r"^\s*(\{|\(\*|//)");
 fn inc(path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred inc filetype
     let lines = get_lines(content, 3);
+    let head = get_lines(content, 2500);
+
+    // SQL includes (common in MySQL/MariaDB test suites).
+    if regex_is_match!(
+        r"(?mi)^\s*(select|insert|update|delete|create|alter|drop|flush|set|use)\b",
+        head
+    ) && head.contains(';')
+    {
+        if head.contains("mysql.") || head.contains("`") || head.contains("@@") {
+            return Some(FileType::MySql);
+        }
+        return Some(FileType::Sql);
+    }
+
+    // HTML includes (including files that start with closing tags).
+    if regex_is_match!(
+        r"(?mi)<!DOCTYPE\s+html\b|<\s*/?\s*(html|head|body|div|p|ul|li|a|table|tr|td|span|meta|link)\b",
+        head
+    ) {
+        return Some(FileType::Html);
+    }
+
+    // Assembly include / macro files (ca65/nasm-style).
+    if regex_is_match!(r"(?mi)^\s*\.(macro|endmacro|segment|define|include)\b", head)
+        || regex_is_match!(r"(?mi)^\s*%macro\b|^\s*%define\b", head)
+    {
+        return asm(path, content);
+    }
+
+    // Pawn / SourcePawn includes.
+    if regex_is_match!(
+        r"(?mi)^\s*#\s*include\s*<\s*(a_samp|sourcemod|amxmodx)\s*>\b|^\s*#\s*pragma\s+semicolon\b|^\s*public\s+\w+\s*\(",
+        head
+    ) || util::findany(head, 0, false, ["#endinput", "forward public", "stock "])
+    {
+        // SourcePawn `.inc` is still commonly treated as SourcePawn.
+        if util::find(head, 0, false, "<sourcemod>") || util::find(head, 0, false, "Plugin:") {
+            return Some(FileType::Sourcepawn);
+        }
+        return Some(FileType::Pawn);
+    }
+    if regex_is_match!(r#"(?m)^\s*#\s*include\s*<"#, head)
+        || util::find(head, 0, false, r#"extern "C""#)
+        || regex_is_match!(r"(?m)^\s*using\s+namespace\b", head)
+        || regex_is_match!(r"(?m)\b(namespace|template|class|struct)\b", head)
+        || util::find(head, 0, false, "::")
+    {
+        return Some(FileType::Cpp);
+    }
     if util::find(lines, 0, false, "perlscript") {
         Some(FileType::AspPerl)
     } else if util::find(lines, 0, false, "<%") {
@@ -669,7 +1014,6 @@ fn lpc(_path: &Path, content: &str) -> Option<FileType> {
             line,
             true,
             [
-                "//",
                 "inherit",
                 "private",
                 "protected",
@@ -705,13 +1049,33 @@ fn m(_path: &Path, content: &str) -> Option<FileType> {
         regex!(r"^\s*#\s*(import|include|define|if|ifn?def|undef|line|error|pragma)\b"i);
 
     let mut saw_comment = false;
+    let mut mumps_score = 0u8;
     for line in content.lines().take(100) {
         let trimmed_line = line.trim_start();
+        // MUMPS indicators.
+        if trimmed_line.starts_with("set ")
+            || trimmed_line.starts_with("write ")
+            || trimmed_line.starts_with("quit")
+        {
+            mumps_score = mumps_score.saturating_add(1);
+        }
+        if trimmed_line.contains("$order(") || trimmed_line.contains("zwrite") {
+            mumps_score = mumps_score.saturating_add(2);
+        }
+        // MUMPS labels are at column 1 and are commonly followed by a `;` comment marker.
+        // Be strict here to avoid false positives in Matlab/ObjC where `;` ends statements.
+        if regex_is_match!(r"^[A-Za-z][A-Za-z0-9]*\s+;", line) {
+            mumps_score = mumps_score.saturating_add(1);
+        }
+
         if trimmed_line.starts_with("/*") {
             // /* ... */ is a comment in Objective C and Murphi, so we can't conclude
             // it's either of them yet, but track this as a hint in case we don't see
             // anything more definitive.
             saw_comment = true;
+        }
+        if mumps_score >= 3 {
+            return Some(FileType::Mumps);
         }
         if trimmed_line.starts_with("//")
             || util::starts_with_any(trimmed_line, false, ["@import"])
@@ -772,6 +1136,9 @@ fn me(path: &Path, _content: &str) -> Option<FileType> {
 }
 
 fn mm(_path: &Path, content: &str) -> Option<FileType> {
+    if regex_is_match!(r"(?m)^\s*<\?xml\b|^\s*<\s*map\b", get_lines(content, 3)) {
+        return Some(FileType::Xml);
+    }
     for line in content.lines().take(20) {
         if regex_is_match!(r"^\s*(#\s*(include|import)\b|@import\b|/\*)"i, line) {
             return Some(FileType::ObjCpp);
@@ -781,15 +1148,15 @@ fn mm(_path: &Path, content: &str) -> Option<FileType> {
 }
 
 fn mms(_path: &Path, content: &str) -> Option<FileType> {
-    for line in content.lines().take(20) {
-        let trimmed_line = line.trim_start();
-        if util::starts_with_any(trimmed_line, true, ["%", "//", "*"]) {
-            return Some(FileType::Mmix);
-        } else if trimmed_line.starts_with('#') {
-            return Some(FileType::Make);
-        }
+    // OpenVMS MMS/MMK build scripts.
+    let head = get_lines(content, 120);
+    if regex_is_match!(r"(?mi)^\s*\.?(ifdef|else|endif|include)\b", head)
+        || regex_is_match!(r"(?m)\$\([A-Za-z0-9_]+\)", head)
+        || regex_is_match!(r"(?m)^\s*#\s*.*\bMMS\b", head)
+    {
+        return Some(FileType::ModuleManagementSystem);
     }
-    Some(FileType::Mmix)
+    Some(FileType::ModuleManagementSystem)
 }
 
 fn is_lprolog(content: &str) -> bool {
@@ -814,6 +1181,18 @@ fn mod_(path: &Path, content: &str) -> Option<FileType> {
         .is_some_and(|name| name.eq_ignore_ascii_case("go.mod"))
     {
         Some(FileType::GoMod)
+    } else if regex_is_match!(
+        r"(?mi)^\s*(param|set|var|minimize|maximize|subject\s+to)\b",
+        get_lines(content, 80)
+    ) {
+        Some(FileType::Ampl)
+    } else if content
+        .lines()
+        .take(50)
+        .filter(|l| !l.trim().is_empty())
+        .all(|l| regex_is_match!(r"(?i)\.(ko|o)\b", l))
+    {
+        Some(FileType::LinuxKernelModule)
     } else if is_lprolog(content) {
         Some(FileType::LambdaProlog)
     } else if util::next_non_blank(content, 0)
@@ -911,11 +1290,33 @@ fn prg(_path: &Path, content: &str) -> Option<FileType> {
 
 fn progress_asm(path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred i filetype
-    for line in content.lines().take(10) {
+    let mut asm_like = 0u8;
+    for line in content.lines().take(25) {
         let trimmed_line = line.trim_start();
-        if trimmed_line.starts_with(';') {
+        if trimmed_line.is_empty() {
+            continue;
+        }
+
+        // Progress tends to start with `/* ... */` blocks; still allow assembly to win
+        // when we see strong opcode/directive signals.
+        if trimmed_line.starts_with(';')
+            || trimmed_line.starts_with(".macro")
+            || trimmed_line.starts_with(".segment")
+            || trimmed_line.starts_with(".include")
+        {
             return asm(path, content);
-        } else if trimmed_line.starts_with("/*") {
+        }
+
+        if regex_is_match!(r"^[A-Za-z_][A-Za-z0-9_]*\s{2,}[A-Za-z.]{2,}\b", trimmed_line) {
+            asm_like = asm_like.saturating_add(1);
+        }
+
+        // Stop early once we have enough evidence.
+        if asm_like >= 2 {
+            return asm(path, content);
+        }
+
+        if trimmed_line.starts_with("/*") {
             break;
         }
     }
@@ -1112,6 +1513,17 @@ fn sh(content: &str, dialect: Option<FileType>) -> Option<FileType> {
 }
 
 fn shell(content: &str, dialect: FileType) -> Option<FileType> {
+    // Shell wrapper scripts used to run Scala programs, e.g.:
+    //   #!/bin/sh
+    //   exec scala "$0" "$@"
+    //   !#
+    if regex_is_match!(
+        r"(?mi)^\s*exec\s+(?:\\S*/)?scala\\b",
+        get_lines(content, 10)
+    ) {
+        return Some(FileType::Scala);
+    }
+
     let mut prev_line = "";
     for (line_num, line) in content.lines().enumerate().take(1000) {
         // skip the first line

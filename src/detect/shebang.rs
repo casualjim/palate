@@ -26,25 +26,62 @@ pub(crate) fn detect_from_shebang(content: &str) -> Option<FileType> {
 
     // Get the interpreter path or name
     let interpreter = if parts[0].ends_with("env") && parts.len() > 1 {
-        // #!/usr/bin/env python3 -> python3
-        parts[1]
+        // Examples:
+        // - #!/usr/bin/env python3 -> python3
+        // - #!/usr/bin/env VAR=1 sh -x -> sh
+        let mut it = parts.iter().skip(1);
+        let mut candidate: Option<&str> = None;
+        while let Some(tok) = it.next() {
+            // Skip environment assignments and env flags.
+            if tok.contains('=') || tok.starts_with('-') {
+                continue;
+            }
+            candidate = Some(tok);
+            break;
+        }
+        candidate?
     } else {
         // #!/bin/bash -> bash
         // #!/usr/bin/perl -> perl
         parts[0].rsplit('/').next().unwrap_or(parts[0])
     };
 
-    // Remove any version suffix for cleaner matching
+    // Handle interpreters where trailing digits are significant, not version suffixes.
+    // E.g. `perl6` / `raku` are different languages than `perl`.
+    let raw_lower = interpreter.to_ascii_lowercase();
+    if matches!(raw_lower.as_str(), "perl6" | "raku" | "rakudo") {
+        return Some(FileType::Raku);
+    }
+
+    // Remove any version suffix for cleaner matching.
     // e.g., "python3.11" -> "python", "ruby2.7" -> "ruby"
     let base_interpreter = interpreter.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.');
+    let base_interpreter = base_interpreter.to_ascii_lowercase();
 
-    interpreter_to_filetype(base_interpreter)
+    let ft = interpreter_to_filetype(&base_interpreter)?;
+
+    // Special-case: shell wrapper scripts that exec into Scala (seen in the samples suite).
+    if matches!(
+        ft,
+        FileType::Sh | FileType::Bash | FileType::Zsh | FileType::Ksh | FileType::Csh | FileType::Tcsh
+    ) && content
+        .lines()
+        .take(10)
+        .any(|l| l.trim_start().starts_with("exec ") && l.contains("scala"))
+    {
+        return Some(FileType::Scala);
+    }
+
+    Some(ft)
 }
 
 /// Hardcoded interpreter mappings built from hyperpolyglot's languages.yml
 /// TODO: Generate this from languages.yml in a build script
 fn interpreter_to_filetype(interpreter: &str) -> Option<FileType> {
     Some(match interpreter {
+        // Compilers-as-interpreters (e.g. `#!/usr/bin/tcc -run`).
+        "tcc" | "cc" | "gcc" | "clang" => FileType::C,
+
         "bash" => FileType::Bash,
         "sh" => FileType::Sh,
         "zsh" => FileType::Zsh,
@@ -53,9 +90,11 @@ fn interpreter_to_filetype(interpreter: &str) -> Option<FileType> {
         "tcsh" => FileType::Tcsh,
         "fish" => FileType::Fish,
         "dash" => FileType::Sh,
+        "rc" => FileType::Rc,
         "perl" => FileType::Perl,
         "python" => FileType::Python,
         "ruby" => FileType::Ruby,
+        "macruby" => FileType::Ruby,
         "php" => FileType::Php,
         "node" => FileType::JavaScript,
         "ts-node" | "deno" | "bun" => FileType::TypeScript,
@@ -75,13 +114,20 @@ fn interpreter_to_filetype(interpreter: &str) -> Option<FileType> {
         "ocaml" | "ocamlrun" => FileType::OCaml,
         "swift" => FileType::Swift,
         "julia" => FileType::Julia,
-        "R" | "rscript" => FileType::R,
+        "r" | "rscript" => FileType::R,
         "matlab" => FileType::Matlab,
         "octave" => FileType::Octave,
+        "nu" | "nush" => FileType::Nu,
+        "apl" => FileType::Apl,
+        "jconsole" => FileType::J,
+        "hy" => FileType::Hy,
         "awk" | "gawk" | "mawk" | "nawk" => FileType::Awk,
         "sed" => FileType::Sed,
         "make" | "gmake" => FileType::Make,
         "nasm" | "yasm" => FileType::Asm,
+        "openrc-run" => FileType::Openrc,
+        "qmake" => FileType::Qmake,
+        "swipl" => FileType::Prolog,
         "pike" => FileType::Pike,
         "bc" => FileType::Bc,
         "dc" => FileType::D,

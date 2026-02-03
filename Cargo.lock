@@ -570,6 +570,7 @@ dependencies = [
  "termcolor",
  "tokio",
  "toml",
+ "walkdir",
 ]
 
 [[package]]

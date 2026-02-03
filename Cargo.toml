@@ -22,7 +22,7 @@ pre-release-commit-message = "Release {{version}} [ci skip]"
 [[bin]]
 name = "codegen"
 path = "src/bin/codegen.rs"
-required-features = ["serde", "palate_polyglot_tokenizer"]
+required-features = ["codegen"]
 
 [[bin]]
 name = "palate"
@@ -43,6 +43,18 @@ detect = [
     "dep:pcre2",
 ]
 
+## Enable the local-only `codegen` binary (`src/bin/codegen.rs`).
+##
+## This is intentionally not enabled by default so `cargo install palate` doesn't build it.
+codegen = [
+    "dep:convert_case",
+    "dep:phf_codegen",
+    "dep:serde",
+    "dep:serde_norway",
+    "dep:pcre2",
+    "dep:palate_polyglot_tokenizer",
+]
+
 ## Provide async API with [`PeekableReader`](detect::PeekableReader) and [`detect_with_reader`](detect::detect_with_reader)
 tokio = ["detect", "dep:tokio"]
 
@@ -56,17 +68,17 @@ classifier = ["detect"]
 aho-corasick = { version = "1.0", optional = true }
 casey = "0.4"
 clap = { version = "4.5", features = ["std"] }
-convert_case = "0.10.0"
+convert_case = { version = "0.10.0", optional = true }
 ignore = "0.4"
 infer = "0.19"
 lazy-regex = { version = "3.0", optional = true }
 once_cell = { version = "1.18", optional = true }
 pcre2 = { version = "0.2", optional = true }
 phf = { version = "0.12.1", features = ["macros"], optional = true }
-phf_codegen = "0.12.1"
+phf_codegen = { version = "0.12.1", optional = true }
 regex = { version = "1.9", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
-serde_norway = "0.9"
+serde_norway = { version = "0.9", optional = true }
 serde_with = { version = "3", optional = true }
 strum = { version = "0.27", features = ["derive", "phf"] }
 strum_macros = "0.27"
@@ -79,7 +91,9 @@ path = "crates/palate_polyglot_tokenizer"
 optional = true
 
 [dev-dependencies]
+serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_norway = "0.9"
 tokio = { version = "1", features = ["macros"] }
 toml = "0.8"
+walkdir = "2"

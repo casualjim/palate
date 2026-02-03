@@ -23,7 +23,6 @@ This project is derived from [tft](https://github.com/RubixDev/tft) (GPL-3.0-or-
 - Comprehensive file type detection
 - Fast PHF-based lookups
 - Content-based detection with heuristics
-- Shebang interpretation support
 - Naive Bayes classifier fallback (with `classifier` feature)
 
 ## Usage

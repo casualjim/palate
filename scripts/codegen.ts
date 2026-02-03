@@ -12,8 +12,8 @@ const neovimFile = "/home/ivan/github/neovim/neovim/runtime/lua/vim/filetype.lua
 const neovimDetectFile = "/home/ivan/github/neovim/neovim/runtime/lua/vim/filetype/detect.lua";
 const baseDir = "/home/ivan/github/casualjim/palate";
 
-// Ground truth: grammars.json from breeze-tree-sitter-parsers
-const grammarsJsonPath = "/home/ivan/github/casualjim/breeze-tree-sitter-parsers/grammars.json";
+// Ground truth for tree-sitter grammar ↔ filetype relationships.
+// This file is produced by scripts/merge-grammars.ts + scripts/merge-helix-data.ts.
 const grammarsMappingPath = "/home/ivan/github/casualjim/palate/target/grammars-mapping-enhanced.json";
 
 // Reference mapping extracted from rubixdev/tft/src/list.rs
@@ -253,7 +253,8 @@ const REFERENCE_MAPPING: Record<string, string> = {
   "gomod": "GoMod",
   "gosum": "GoSum",
   "gowork": "GoWork",
-  "gp": "Gp",
+  // `gp` is an alias of the canonical `gnuplot` filetype.
+  "gp": "GnuPlot",
   "gpg": "Gpg",
   "grads": "Grads",
   "graphql": "GraphQl",
@@ -838,55 +839,46 @@ type ParseOverrides = {
   staticValueOverrideByKey: Record<string, Record<string, string>>;
 };
 
-function buildGrammarInfo(
-  grammarsData: any,
-  grammarMappingByName: Map<string, any>,
-) {
-  const grammarInfoByName: Record<string, GrammarInfo> = {};
+function buildGrammarInfo(grammarsMapping: any[]) {
   const variantByFiletype: Record<string, string> = {};
   const filetypesFromGrammars = new Set<string>();
 
-  for (const grammar of grammarsData.grammars) {
-    const mapping = grammarMappingByName.get(grammar.name);
-    const nvimFiletype = mapping?.nvim_filetype || mapping?.effective_filetype || null;
-    const variant = toPascalCase(grammar.name);
+  for (const mapping of grammarsMapping) {
+    const grammarName = String(mapping?.grammar || "").trim();
+    if (!grammarName) continue;
 
-    grammarInfoByName[grammar.name] = {
-      variant,
-      nvimFiletype,
-    };
+    const effectiveFiletype =
+      (mapping?.effective_filetype ? String(mapping.effective_filetype) : "").trim() ||
+      (mapping?.nvim_filetype ? String(mapping.nvim_filetype) : "").trim() ||
+      grammarName;
+
+    const variant = toPascalCase(grammarName);
 
     // Variant resolution should work for both the grammar name and the mapped filetype.
-    variantByFiletype[grammar.name] = variant;
-    if (nvimFiletype) {
-      variantByFiletype[nvimFiletype] = variant;
-      filetypesFromGrammars.add(nvimFiletype);
-    } else {
-      filetypesFromGrammars.add(grammar.name);
+    variantByFiletype[grammarName] = variant;
+    if (effectiveFiletype) {
+      variantByFiletype[effectiveFiletype] = variant;
+      filetypesFromGrammars.add(effectiveFiletype);
+    }
+
+    // Some Neovim filetypes are intentionally canonicalized to different identifiers
+    // (e.g. cs -> csharp, typescriptreact -> tsx). We treat these Neovim filetypes as
+    // aliases *only* when it's a stable canonicalization and not a broad filetype used
+    // for multiple dialects (e.g. sh should stay sh, not bash).
+    const nvimFt = (mapping?.nvim_filetype ? String(mapping.nvim_filetype) : "").trim();
+    if (nvimFt && nvimFt !== effectiveFiletype && nvimFt !== "sh") {
+      variantByFiletype[nvimFt] = variant;
     }
   }
 
-  return { grammarInfoByName, variantByFiletype, filetypesFromGrammars };
+  return { variantByFiletype, filetypesFromGrammars };
 }
 
-// Read the grammars.json and mapping (ground truth)
-const grammarsData = JSON.parse(await Bun.file(grammarsJsonPath).text());
+// Read the grammar ↔ filetype mapping (ground truth for grammars)
 const grammarsMapping = JSON.parse(await Bun.file(grammarsMappingPath).text());
+console.log(`📦 Loaded ${grammarsMapping.length} entries from grammars-mapping-enhanced.json`);
 
-console.log(`📦 Loaded ${grammarsData.grammars.length} grammars from grammars.json`);
-
-const grammarMappingByName = new Map<string, any>();
-for (const mapping of grammarsMapping) {
-  grammarMappingByName.set(mapping.grammar, mapping);
-}
-
-const {
-  grammarInfoByName,
-  variantByFiletype,
-  filetypesFromGrammars,
-} = buildGrammarInfo(grammarsData, grammarMappingByName);
-
-console.log(`📋 Built info map for ${Object.keys(grammarInfoByName).length} grammars`);
+const { variantByFiletype, filetypesFromGrammars } = buildGrammarInfo(grammarsMapping);
 
 // Read the Neovim filetype.lua file
 const content = await Bun.file(neovimFile).text();
@@ -1033,6 +1025,10 @@ const MANUAL_OVERRIDES: Record<string, ["static" | "dynamic", string]> = {
   "vh": ["static", "SystemVerilog"],
   "vlg": ["static", "SystemVerilog"],
   "zir": ["static", "Zir"],
+  // Shader extensions that are commonly used for GLSL/HLSL and are frequently mis-mapped.
+  "vsh": ["static", "Glsl"],
+  "fsh": ["static", "Glsl"],
+  "fx": ["static", "Hlsl"],
 };
 
 for (const [ext, [kind, target]] of Object.entries(MANUAL_OVERRIDES)) {
@@ -1054,6 +1050,14 @@ const MANUAL_FILENAME_OVERRIDES: Record<string, ["static" | "detect" | "closure"
   "config.nu": ["static", "nu"],
   "env.nu": ["static", "nu"],
   ".env": ["closure", "|_, content| detect::sh(content, None)"],
+  // Common shell rc/profile filenames without leading dots (present in the samples suite).
+  "bash_aliases": ["static", "bash"],
+  "bash_logout": ["static", "bash"],
+  "bash_profile": ["static", "bash"],
+  "cshrc": ["static", "csh"],
+  "login": ["static", "sh"],
+  "profile": ["static", "sh"],
+  "zprofile": ["static", "zsh"],
   "printcap": ["static", "ptcap-print"],
   "termcap": ["static", "ptcap-term"],
   "xorg.conf": ["static", "xf86conf-4"],
@@ -1119,20 +1123,152 @@ const filenameEntries: Array<[string, string, string]> = [];
 const seenExtensions = new Set<string>();
 const seenFilenames = new Set<string>();
 
+// Extra serialize aliases derived from Linguist metadata.
+// These are attached to canonical FileType variants so FileType::from_str can
+// parse common language names and aliases without introducing new variants.
+const linguistExtraSerializesByVariant = new Map<string, Set<string>>();
+
+type LinguistLanguage = {
+  aliases?: string[];
+  extensions?: string[];
+  filenames?: string[];
+  fs_name?: string;
+};
+
+function loadLinguistLanguages(): Record<string, LinguistLanguage> {
+  const ymlPath = `${baseDir}/languages.yml`;
+  const py = Bun.spawnSync({
+    cmd: [
+      "python",
+      "-c",
+      `
+import json, sys
+import yaml
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+  data = yaml.safe_load(f)
+out = {}
+for name, meta in (data or {}).items():
+  if not isinstance(meta, dict):
+    continue
+  out[name] = {
+    "aliases": meta.get("aliases") or [],
+    "extensions": meta.get("extensions") or [],
+    "filenames": meta.get("filenames") or [],
+    "fs_name": meta.get("fs_name"),
+  }
+print(json.dumps(out))
+      `.trim(),
+      ymlPath,
+    ],
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
+  if (py.exitCode !== 0) {
+    throw new Error(
+      `Failed to parse languages.yml via python: exit=${py.exitCode}\n${new TextDecoder().decode(py.stderr)}`,
+    );
+  }
+  const stdout = new TextDecoder().decode(py.stdout);
+  return JSON.parse(stdout);
+}
+
+function slugifyLanguageName(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function resolveLinguistCanonicalFiletype(
+  languageName: string,
+  lang: LinguistLanguage,
+  canonicalFiletypes: Set<string>,
+  existingFilenameToFiletype: Map<string, string>,
+  existingExtensionToFiletype: Map<string, string>,
+): string | null {
+  function normalizeCandidate(s: string): string {
+    const lower = (s || "").trim().toLowerCase();
+    if (!lower) return "";
+    // Avoid spaces in filetype identifiers (some Linguist entries use human-ish aliases).
+    if (/\s/.test(lower)) return slugifyLanguageName(lower);
+    return lower;
+  }
+
+  const aliases = (lang.aliases || [])
+    .map((a) => normalizeCandidate(a))
+    .filter(Boolean);
+
+  const fsName = normalizeCandidate(lang.fs_name || "");
+  const slug = slugifyLanguageName(languageName);
+
+  // Prefer a canonical filetype that our detector already returns for one of the
+  // language's known extensions/filenames.
+  //
+  // NOTE: Prefer extensions first. Some broad languages (e.g. "Shell") include
+  // very specific filenames (e.g. `.tmux.conf`) that would otherwise “steal” the
+  // canonical mapping and attach generic aliases like "shell" to the wrong variant.
+  for (const extRaw of lang.extensions || []) {
+    const ext = (extRaw || "").trim().replace(/^\./, "").toLowerCase();
+    if (!ext) continue;
+    const ft = existingExtensionToFiletype.get(ext);
+    if (ft) return ft;
+  }
+
+  // If Linguist provides an identifier that matches one of our canonical filetypes,
+  // prefer it over filename matching to avoid “stealing” broad languages via a
+  // specific config filename present in our tables.
+  if (slug && canonicalFiletypes.has(slug)) {
+    return slug;
+  }
+  if (fsName && canonicalFiletypes.has(fsName)) {
+    return fsName;
+  }
+  // Prefer an alias that already exists as a canonical filetype, but only after
+  // checking the (more stable) extension mapping. Linguist aliases can refer to
+  // related-but-distinct formats (e.g. JSON includes `jsonl`).
+  for (const a of aliases) {
+    if (canonicalFiletypes.has(a)) return a;
+  }
+
+  for (const filename of lang.filenames || []) {
+    const key = filename.trim();
+    if (!key) continue;
+    const ft = existingFilenameToFiletype.get(key);
+    if (ft) return ft;
+  }
+
+  function avoidManualExtensionKeys(candidate: string): string {
+    const override = (MANUAL_OVERRIDES as Record<string, ["static" | "dynamic", string]>)[candidate];
+    if (!override) return candidate;
+    const [kind, target] = override;
+    // If Linguist hands us an extension-like alias (e.g. "ejs" or "m2"), prefer the
+    // actual canonical filetype (variant) used by our extension map.
+    if (kind === "static") return target.toLowerCase();
+    return candidate;
+  }
+
+  // Otherwise, choose a stable, filesystem-ish canonical name.
+  if (aliases.length > 0) return avoidManualExtensionKeys(aliases[0]);
+  if (fsName) return avoidManualExtensionKeys(fsName);
+
+  return slug ? avoidManualExtensionKeys(slug) : null;
+}
+
 // Track manual extension overrides to avoid duplicates from source data
 for (const key of Object.keys(MANUAL_OVERRIDES)) {
   seenExtensions.add(key);
 }
 
-// Add all grammars from grammars.json (ground truth)
-// This ensures all 348 grammars are included in the generated list.rs
+// Add all filetypes referenced by the grammar mapping (ground truth).
 for (const filetype of filetypesFromGrammars) {
   filetypes.add(filetype);
 }
 
-console.log(`Added ${Object.keys(grammarInfoByName).length} grammars to filetypes set`);
+console.log(`Added ${filetypesFromGrammars.size} grammar filetypes to filetypes set`);
 
-// Add effective_filetypes from grammarsMapping to ensure languages like "cs" and "tsx" are included
+// Add effective_filetypes from grammarsMapping to ensure languages like "cs" and "tsx" are included.
 for (const mapping of grammarsMapping) {
   if (mapping.effective_filetype && !filetypes.has(mapping.effective_filetype)) {
     filetypes.add(mapping.effective_filetype);
@@ -1156,12 +1292,23 @@ function toFtVariant(str: string): string {
   }
 
   // Fallback: simple PascalCase conversion for unknown filetypes
-  // Replace dots, hyphens, and # with underscores for processing
-  let result = str.replace(/[.%\-#]/g, "_");
+  // Replace non-identifier characters with underscores for processing.
+  // This must be robust against values coming from external sources (Linguist, etc.).
+  let result = str.replace(/[^0-9A-Za-z]+/g, "_");
 
   // Split by underscore, capitalize each part, then join
   const parts = result.split("_").filter((p) => p.length > 0);
   result = parts.map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join("");
+
+  // Rust identifiers can't start with a digit.
+  if (/^[0-9]/.test(result)) {
+    result = `Ft${result}`;
+  }
+
+  // Rust reserves `Self` as a special identifier.
+  if (result === "Self") {
+    result = "SelfLang";
+  }
 
   return result;
 }
@@ -1815,6 +1962,217 @@ for (const [key, [, filetype]] of Object.entries(MANUAL_PATH_SUFFIX_OVERRIDES)) 
 }
 
 // ============================================================================
+// Add Linguist languages.yml extensions/filenames (fill gaps only)
+// ============================================================================
+// Neovim/tft remain canonical: we only add entries that are not already present.
+console.log("Filling gaps from languages.yml (extensions/filenames)...");
+const linguistLanguages = loadLinguistLanguages();
+
+// Build lookup maps for what the current detector already returns for known
+// filenames/extensions. This helps align Linguist language names to canonical
+// Neovim/tft filetypes (e.g. "Fantom" -> "fan", "Ant Build System" -> "ant").
+const existingFilenameToFiletype = new Map<string, string>();
+for (const [key, kind, value] of filenameEntries) {
+  if (kind === "static") {
+    existingFilenameToFiletype.set(key, value);
+  }
+}
+
+const existingExtensionToFiletype = new Map<string, string>();
+for (const [key, kind, value] of extEntries) {
+  if (kind === "static" || kind === "starsetf_static") {
+    existingExtensionToFiletype.set(key, value);
+  }
+}
+for (const [key, [kind, value]] of Object.entries(MANUAL_OVERRIDES)) {
+  if (kind === "static") {
+    existingExtensionToFiletype.set(key, value.toLowerCase());
+  }
+}
+
+for (const [languageName, lang] of Object.entries(linguistLanguages)) {
+  // Linguist's "Text" is a pseudo-language used to label plain text/prose.
+  //
+  // Critically, it includes a grab-bag of ambiguous extensions (e.g. `.nb`, `.fr`)
+  // and is not meant to override actual programming language detections.
+  //
+  // We:
+  // - Force canonical to `text` (so `fundamental` / `plain text` don't become "mma")
+  // - Import only the filename-based rules (README/LICENSE/etc.) which are low ambiguity
+  // - Avoid importing the extensions list.
+  if (languageName === "Text") {
+    const canonical = "text";
+    filetypes.add(canonical);
+
+    const variant = toFtVariant(canonical);
+    const extra = linguistExtraSerializesByVariant.get(variant) ?? new Set<string>();
+    for (const a of lang.aliases || []) {
+      const raw = (a || "").trim().toLowerCase();
+      const alias = /\s/.test(raw) ? slugifyLanguageName(raw) : raw;
+      if (alias && alias !== canonical) extra.add(alias);
+    }
+    const fsRaw = (lang.fs_name || "").trim().toLowerCase();
+    const fsName = /\s/.test(fsRaw) ? slugifyLanguageName(fsRaw) : fsRaw;
+    if (fsName && fsName !== canonical) extra.add(fsName);
+    const slug = slugifyLanguageName(languageName);
+    if (slug && slug !== canonical) extra.add(slug);
+    linguistExtraSerializesByVariant.set(variant, extra);
+
+    // Only import low-ambiguity extensions from Linguist's Text. `.no` is used
+    // in the samples suite as plain text (and is not claimed by other filetypes).
+    for (const extRaw of lang.extensions || []) {
+      if (!extRaw) continue;
+      const ext = (extRaw.startsWith(".") ? extRaw.slice(1) : extRaw).toLowerCase();
+      if (!ext || ext !== "no") continue;
+      if (seenExtensions.has(ext)) continue;
+      extEntries.push([ext, "static", canonical]);
+      seenExtensions.add(ext);
+    }
+
+    for (const filename of lang.filenames || []) {
+      if (!filename) continue;
+      if (seenFilenames.has(filename)) continue;
+      filenameEntries.push([filename, "static", canonical]);
+      seenFilenames.add(filename);
+    }
+    continue;
+  }
+
+  // Shell is extremely broad in Linguist and includes a grab-bag of extensions
+  // and config filenames. Importing those as extension/filename mappings would
+  // actively harm detection (e.g. `.tmux` is better served by a tmux parser).
+  //
+  // We still want to accept common names like "shell" / "shell-script" via
+  // FileType::from_str, so we attach them as extra serializations only.
+  if (languageName === "Shell") {
+    const canonical = filetypes.has("sh") ? "sh" : "bash";
+    filetypes.add(canonical);
+
+    const variant = toFtVariant(canonical);
+    const extra = linguistExtraSerializesByVariant.get(variant) ?? new Set<string>();
+    for (const a of lang.aliases || []) {
+      const raw = (a || "").trim().toLowerCase();
+      const alias = /\s/.test(raw) ? slugifyLanguageName(raw) : raw;
+      if (alias && alias !== canonical) extra.add(alias);
+    }
+    const fsRaw = (lang.fs_name || "").trim().toLowerCase();
+    const fsName = /\s/.test(fsRaw) ? slugifyLanguageName(fsRaw) : fsRaw;
+    if (fsName && fsName !== canonical) extra.add(fsName);
+    const slug = slugifyLanguageName(languageName);
+    if (slug && slug !== canonical) extra.add(slug);
+    linguistExtraSerializesByVariant.set(variant, extra);
+    continue;
+  }
+
+  // Standard ML: Linguist lists `.ml` which overlaps with OCaml. Prefer the
+  // canonical SML filetype and do not import the conflicting `.ml` extension.
+  if (languageName === "Standard ML") {
+    const canonical = filetypes.has("sml") ? "sml" : "sml";
+    filetypes.add(canonical);
+
+    const variant = toFtVariant(canonical);
+    const extra = linguistExtraSerializesByVariant.get(variant) ?? new Set<string>();
+    for (const a of lang.aliases || []) {
+      const raw = (a || "").trim().toLowerCase();
+      const alias = /\s/.test(raw) ? slugifyLanguageName(raw) : raw;
+      if (alias && alias !== canonical) extra.add(alias);
+    }
+    const fsRaw = (lang.fs_name || "").trim().toLowerCase();
+    const fsName = /\s/.test(fsRaw) ? slugifyLanguageName(fsRaw) : fsRaw;
+    if (fsName && fsName !== canonical) extra.add(fsName);
+    const slug = slugifyLanguageName(languageName);
+    if (slug && slug !== canonical) extra.add(slug);
+    linguistExtraSerializesByVariant.set(variant, extra);
+
+    for (const extRaw of lang.extensions || []) {
+      if (!extRaw) continue;
+      const ext = (extRaw.startsWith(".") ? extRaw.slice(1) : extRaw).toLowerCase();
+      if (!ext || ext === "ml") continue;
+      if (seenExtensions.has(ext)) continue;
+      extEntries.push([ext, "static", canonical]);
+      seenExtensions.add(ext);
+    }
+    continue;
+  }
+
+  // Wolfram Language: `.m` overlaps with Objective-C/Matlab/MUMPS. Prefer `mma`
+  // and do not import the conflicting `.m` extension.
+  if (languageName === "Wolfram Language") {
+    const canonical = filetypes.has("mma") ? "mma" : "mma";
+    filetypes.add(canonical);
+
+    const variant = toFtVariant(canonical);
+    const extra = linguistExtraSerializesByVariant.get(variant) ?? new Set<string>();
+    for (const a of lang.aliases || []) {
+      const raw = (a || "").trim().toLowerCase();
+      const alias = /\s/.test(raw) ? slugifyLanguageName(raw) : raw;
+      if (alias && alias !== canonical) extra.add(alias);
+    }
+    const fsRaw = (lang.fs_name || "").trim().toLowerCase();
+    const fsName = /\s/.test(fsRaw) ? slugifyLanguageName(fsRaw) : fsRaw;
+    if (fsName && fsName !== canonical) extra.add(fsName);
+    const slug = slugifyLanguageName(languageName);
+    if (slug && slug !== canonical) extra.add(slug);
+    linguistExtraSerializesByVariant.set(variant, extra);
+
+    for (const extRaw of lang.extensions || []) {
+      if (!extRaw) continue;
+      const ext = (extRaw.startsWith(".") ? extRaw.slice(1) : extRaw).toLowerCase();
+      if (!ext || ext === "m") continue;
+      if (seenExtensions.has(ext)) continue;
+      extEntries.push([ext, "static", canonical]);
+      seenExtensions.add(ext);
+    }
+    continue;
+  }
+
+  const canonical = resolveLinguistCanonicalFiletype(
+    languageName,
+    lang,
+    filetypes,
+    existingFilenameToFiletype,
+    existingExtensionToFiletype,
+  );
+  if (!canonical) continue;
+
+  // Ensure the canonical FileType exists.
+  filetypes.add(canonical);
+
+  // Collect additional serialize aliases for this FileType.
+  // NOTE: Do NOT add these strings to `filetypes`, otherwise we'd create bogus
+  // variants (e.g. `H` from `.h`) instead of aliases.
+  const variant = toFtVariant(canonical);
+  const extra = linguistExtraSerializesByVariant.get(variant) ?? new Set<string>();
+  for (const a of lang.aliases || []) {
+    const raw = (a || "").trim().toLowerCase();
+    const alias = /\s/.test(raw) ? slugifyLanguageName(raw) : raw;
+    if (alias && alias !== canonical) extra.add(alias);
+  }
+  const fsRaw = (lang.fs_name || "").trim().toLowerCase();
+  const fsName = /\s/.test(fsRaw) ? slugifyLanguageName(fsRaw) : fsRaw;
+  if (fsName && fsName !== canonical) extra.add(fsName);
+  const slug = slugifyLanguageName(languageName);
+  if (slug && slug !== canonical) extra.add(slug);
+  linguistExtraSerializesByVariant.set(variant, extra);
+
+  for (const extRaw of lang.extensions || []) {
+    if (!extRaw) continue;
+    const ext = (extRaw.startsWith(".") ? extRaw.slice(1) : extRaw).toLowerCase();
+    if (!ext) continue;
+    if (seenExtensions.has(ext)) continue;
+    extEntries.push([ext, "static", canonical]);
+    seenExtensions.add(ext);
+  }
+
+  for (const filename of lang.filenames || []) {
+    if (!filename) continue;
+    if (seenFilenames.has(filename)) continue;
+    filenameEntries.push([filename, "static", canonical]);
+    seenFilenames.add(filename);
+  }
+}
+
+// ============================================================================
 // First pass: parse pattern table to collect all filetypes
 // ============================================================================
 console.log("Parsing pattern table for additional filetypes...");
@@ -2022,13 +2380,16 @@ if (leakedManualExtensions.length > 0) {
 }
 
 const ftToVariant: Record<string, string> = {};
+const variantToFiletypes = new Map<string, Set<string>>();
 for (const ft of filetypeList) {
-  ftToVariant[ft] = toFtVariant(ft);
+  const variant = toFtVariant(ft);
+  ftToVariant[ft] = variant;
+  const set = variantToFiletypes.get(variant) ?? new Set<string>();
+  set.add(ft);
+  variantToFiletypes.set(variant, set);
 }
 
-// Deduplicate variants - if multiple filetypes map to the same variant,
-// only use the first one (which will be alphabetically first due to sorting).
-// We then override with canonical names where we want specific serialization.
+// Canonical names where we want specific serialization.
 const VARIANT_CANONICAL_NAMES: Record<string, string> = {
   "FSharp": "fsharp",
   "CSharp": "csharp",
@@ -2043,21 +2404,6 @@ const VARIANT_CANONICAL_NAMES: Record<string, string> = {
   "Jsx": "jsx",
   "Diff": "gitdiff",
 };
-
-const variantToFiletype: Record<string, string> = {};
-for (const ft of filetypeList) {
-  const variant = ftToVariant[ft];
-  if (!variantToFiletype[variant]) {
-    variantToFiletype[variant] = ft;
-  }
-}
-
-// Apply canonical name overrides
-for (const [variant, canonicalFt] of Object.entries(VARIANT_CANONICAL_NAMES)) {
-  if (variantToFiletype[variant]) {
-    variantToFiletype[variant] = canonicalFt;
-  }
-}
 
 // Extra serialize names for variants that need multiple aliases
 // Key: variant name, Value: array of additional serialize names (beyond the canonical one)
@@ -2074,22 +2420,151 @@ const VARIANT_EXTRA_SERIALIZES: Record<string, string[]> = {
   "Haxe": ["hx"]
 };
 
-const uniqueVariants = Object.entries(variantToFiletype).sort((a, b) => a[1].localeCompare(b[1]));
+type VariantInfo = {
+  variant: string;
+  canonical: string;
+  extraSerializes: string[];
+};
+
+// Extra serialize aliases derived from the tree-sitter grammar mapping.
+// These are attached to canonical FileType variants so FileType::from_str can
+// parse common grammar and editor language identifiers (e.g. "cs" -> csharp).
+const grammarExtraSerializesByVariant = new Map<string, Set<string>>();
+function normalizeSerializeCandidate(s: string): string {
+  const lower = (s || "").trim().toLowerCase();
+  if (!lower) return "";
+  if (/\s/.test(lower)) return slugifyLanguageName(lower);
+  return lower;
+}
+
+for (const mapping of grammarsMapping) {
+  const canonicalFt = normalizeSerializeCandidate(
+    mapping?.effective_filetype || mapping?.nvim_filetype || mapping?.grammar || "",
+  );
+  if (!canonicalFt) continue;
+
+  const variant = ftToVariant[canonicalFt];
+  if (!variant) continue;
+
+  const extras = grammarExtraSerializesByVariant.get(variant) ?? new Set<string>();
+  const candidates: Array<string | undefined | null> = [
+    mapping?.grammar,
+    mapping?.nvim_filetype,
+    mapping?.helix_language_name,
+  ];
+
+  for (const raw of candidates) {
+    const candidate = normalizeSerializeCandidate(String(raw || ""));
+    if (!candidate) continue;
+    if (candidate !== canonicalFt) extras.add(candidate);
+  }
+
+  if (extras.size > 0) {
+    grammarExtraSerializesByVariant.set(variant, extras);
+  }
+}
+
+// Ensure serialize names are unique across variants.
+const serializeOwner = new Map<string, string>();
+const variants: VariantInfo[] = [];
+
+type VariantDraft = {
+  variant: string;
+  canonical: string;
+  extras: Set<string>;
+  ftsSet: Set<string>;
+};
+
+const drafts: VariantDraft[] = [];
+
+for (const [variant, ftsSet] of variantToFiletypes.entries()) {
+  const fts = Array.from(ftsSet).sort((a, b) => a.localeCompare(b));
+  const preferredCanonical = VARIANT_CANONICAL_NAMES[variant];
+  const variantLower = variant.toLowerCase();
+  const canonical =
+    preferredCanonical ??
+    (fts.includes(variantLower) ? variantLower : (fts[0] ?? variantLower));
+
+  const extras = new Set<string>();
+
+  // All other canonical filetype strings that map to the same variant become
+  // additional serialize aliases (previously we dropped these, causing missing
+  // FileType::from_str coverage).
+  for (const ft of fts) {
+    if (ft !== canonical) extras.add(ft);
+  }
+
+  for (const extra of VARIANT_EXTRA_SERIALIZES[variant] || []) {
+    if (extra && extra !== canonical) extras.add(extra);
+  }
+
+  for (const extra of linguistExtraSerializesByVariant.get(variant) || []) {
+    if (extra && extra !== canonical) extras.add(extra);
+  }
+
+  for (const extra of grammarExtraSerializesByVariant.get(variant) || []) {
+    if (extra && extra !== canonical) extras.add(extra);
+  }
+
+  drafts.push({ variant, canonical, extras, ftsSet });
+}
+
+// Pass 1: reserve canonical serialize names for all variants.
+for (const { variant, canonical, ftsSet } of drafts) {
+  const existingOwner = serializeOwner.get(canonical);
+  if (existingOwner && existingOwner !== variant) {
+    const existingFts = Array.from(variantToFiletypes.get(existingOwner) ?? []).sort().join(", ");
+    const currentFts = Array.from(ftsSet ?? []).sort().join(", ");
+    throw new Error(
+      `Duplicate canonical serialize "${canonical}" for ${existingOwner} and ${variant}\n` +
+        `  ${existingOwner} filetypes: ${existingFts}\n` +
+        `  ${variant} filetypes: ${currentFts}`,
+    );
+  }
+  serializeOwner.set(canonical, variant);
+}
+
+// Pass 2: add extra serialize aliases, filtering against already-reserved canonicals.
+for (const { variant, canonical, extras } of drafts) {
+  const filteredExtras: string[] = [];
+  for (const s of Array.from(extras).sort((a, b) => a.localeCompare(b))) {
+    const owner = serializeOwner.get(s);
+    if (owner && owner !== variant) continue;
+    serializeOwner.set(s, variant);
+    filteredExtras.push(s);
+  }
+  variants.push({ variant, canonical, extraSerializes: filteredExtras });
+}
+
+variants.sort((a, b) => a.canonical.localeCompare(b.canonical));
 
 // ============================================================================
 // Generate list.rs
 // ============================================================================
 console.log("Generating src/list.rs...");
+const textVariantInfo = variants.find((v) => v.canonical === "text");
+const textSerializeAttrs =
+  (textVariantInfo?.extraSerializes || []).length > 0
+    ? `            #[strum(serialize = "text", ${(
+          textVariantInfo?.extraSerializes || []
+        )
+          .map((s) => `serialize = "${s}"`)
+          .join(", ")})]\n`
+    : "";
 const listRsContent = `macro_rules! list {
+    (@canonical $variant:ident as $lit:literal) => { $lit };
+    (@canonical $variant:ident) => { casey::lower!(stringify!($variant)) };
     ($($(#[$($attr:meta),+])? $variant:ident $(as $as:literal)?),* $(,)?) => {
+        use core::fmt;
+
         /// A non-exhaustive list of text file types.
         ///
         /// The type derives the following traits for convenience. For (de)serialization to/from strings,
         /// lowercase casing is used unless otherwise specified in the variants docs.
         ///
-        /// - [\`strum::Display\`]: [\`Display\`](core::fmt::Display) formatting and a \`.to_string()\` method
-        /// - [\`strum::AsRefStr\`]: [\`AsRef<str>\`] impl for conversion into \`&str\`
-        /// - [\`strum::IntoStaticStr\`]: [\`From<FileType>\`] impl for conversion into \`&'static str\`
+        /// - [\`Display\`](core::fmt::Display): formatting and a \`.to_string()\` method (canonical form)
+        /// - [\`AsRef<str>\`]: conversion into \`&str\` (canonical form)
+        /// - [\`From<FileType>\` for \`&'static str\`]: conversion into \`&'static str\` (canonical form)
         /// - [\`strum::EnumString\`]: [\`FromStr\`](core::str::FromStr) impl for turning strings into the
         ///   corresponding variant
         /// - [\`strum::EnumVariantNames\`]: an associated \`VARIANTS\` constant containing the string names of
@@ -2104,9 +2579,6 @@ const listRsContent = `macro_rules! list {
         /// - <span class="stab portability"><code>serde</code></span> [\`serde::Deserialize\`]: deserialize
         ///   from a string
         #[derive(
-            strum::Display,
-            strum::AsRefStr,
-            strum::IntoStaticStr,
             strum_macros::EnumString,
             strum_macros::VariantNames,
             Clone,
@@ -2125,6 +2597,7 @@ const listRsContent = `macro_rules! list {
         #[non_exhaustive]
         pub enum FileType {
             /// A plain text file. This is the default variant. (De)serialized as \`text\`.
+${textSerializeAttrs}
             #[default]
             Text,
 
@@ -2135,26 +2608,55 @@ const listRsContent = `macro_rules! list {
                 $variant,
             )*
         }
+
+        impl FileType {
+            /// Canonical string representation (tft/nvim filetype).
+            pub const fn canonical(self) -> &'static str {
+                match self {
+                    FileType::Text => "text",
+                    $(FileType::$variant => list!(@canonical $variant $(as $as)?),)*
+                }
+            }
+        }
+
+        impl AsRef<str> for FileType {
+            fn as_ref(&self) -> &str {
+                (*self).canonical()
+            }
+        }
+
+        impl From<FileType> for &'static str {
+            fn from(value: FileType) -> Self {
+                value.canonical()
+            }
+        }
+
+        impl fmt::Display for FileType {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str((*self).canonical())
+            }
+        }
     };
 }
 
 list! {
-${uniqueVariants
-  .filter(([, ft]) => ft !== "text")
-  .map(([variant, ft]) => {
+${variants
+  .filter(({ canonical }) => canonical !== "text")
+  .map(({ variant, canonical, extraSerializes }) => {
     const simpleLower = variant.toLowerCase();
-    const extraSerializes = VARIANT_EXTRA_SERIALIZES[variant];
     let attrs = "";
-    if (extraSerializes && extraSerializes.length > 0) {
-      const serializeAttrs = extraSerializes.map(s => `serialize = "${s}"`).join(", ");
+    if (extraSerializes.length > 0) {
+      const serializeAttrs = extraSerializes.map((s) => `serialize = "${s}"`).join(", ");
       attrs = `    #[strum(${serializeAttrs})]\n`;
-      // Always use explicit "as" when there are extra serializes to ensure canonical name is preserved
-      return `${attrs}    ${variant} as "${ft}",\n`;
+      // Always use explicit "as" when there are extra serializes, otherwise the first
+      // `serialize = "..."`
+      // entry becomes the primary representation and we lose the canonical one.
+      return `${attrs}    ${variant} as "${canonical}",\n`;
     }
-    if (ft !== simpleLower) {
-      return `${attrs}    ${variant} as "${ft}",\n`;
+    if (canonical !== simpleLower) {
+      return `${attrs}    ${variant} as "${canonical}",\n`;
     }
-    return `${attrs}    ${variant},\n`;
+    return `    ${variant},\n`;
   })
   .join("")}
 }

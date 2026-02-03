@@ -64,8 +64,11 @@ pub(crate) fn apply_heuristics(extension: &str, _path: &Path, content: &str) -> 
                         return rule.languages.first().copied();
                     };
                 } else {
-                    // if there is no pattern then it is a match by default
-                    return rule.languages.first().copied();
+                    // No pattern means "still ambiguous". Only treat it as a default
+                    // when there's exactly one language.
+                    if rule.languages.len() == 1 {
+                        return rule.languages.first().copied();
+                    }
                 };
             }
             None
@@ -119,6 +122,16 @@ mod tests {
         let content = "anything";
         assert_eq!(
             apply_heuristics(".xyz", Path::new("test.xyz"), content),
+            None
+        );
+    }
+
+    #[test]
+    fn test_heuristics_mod_fallback_returns_first_language() {
+        // `.mod` includes a fallback rule (no pattern) with multiple candidate languages.
+        // Our current implementation treats this as "still ambiguous".
+        assert_eq!(
+            apply_heuristics(".mod", Path::new("x.mod"), ""),
             None
         );
     }

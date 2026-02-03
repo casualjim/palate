@@ -255,6 +255,19 @@ nvim-like = true
 injections = true
 locals = false
 
+[[languages]]
+name = "blueprint"
+group = "all"
+file-types = ["blp", "blueprint"]
+[languages.parser]
+git = { url = "https://gitlab.com/gabmus/tree-sitter-blueprint", rev = "355ef84ef8a958ac822117b652cf4d49bac16c79", branch = "master" }
+external-scanner = { c = false, cpp = false }
+ffi-func = "tree_sitter_blueprint"
+package = "tree-sitter-blueprint"
+[languages.queries]
+nvim-like = true
+injections = true
+locals = false
 
 [[languages]]
 name = "bp"
@@ -437,6 +450,19 @@ nvim-like = true
 injections = true
 locals = true
 
+[[languages]]
+name = "clarity"
+group = "all"
+file-types = ["clar", "clarity"]
+[languages.parser]
+git = { url = "https://github.com/xlittlerag/tree-sitter-clarity", rev = "cbb3ffe8688aca558286fd45ed46857a1f3207bb" }
+external-scanner = { c = false, cpp = false }
+ffi-func = "tree_sitter_clarity"
+package = "tree-sitter-clarity"
+[languages.queries]
+nvim-like = true
+injections = false
+locals = false
 
 [[languages]]
 name = "clojure"
@@ -914,6 +940,21 @@ injections = true
 locals = false
 
 [[languages]]
+name = "elisp"
+group = "all"
+file-types = ["el", "elisp"]
+[languages.parser]
+git = { url = "https://github.com/Wilfred/tree-sitter-elisp", rev = "29b4e49275f4a947ce17c8533bc20a1f97768c70" }
+external-scanner = { c = false, cpp = false }
+ffi-func = "tree_sitter_elisp"
+package = "tree-sitter-elisp"
+[languages.queries]
+nvim-like = true
+injections = false
+locals = false
+
+
+[[languages]]
 name = "elixir"
 group = "most"
 file-types = ["elixir"]
@@ -1215,6 +1256,19 @@ nvim-like = true
 injections = true
 locals = false
 
+[[languages]]
+name = "fusion"
+group = "all"
+file-types = ["fusion"]
+[languages.parser]
+git = { url = "https://gitlab.com/jirgn/tree-sitter-fusion", rev = "19db2f47ba4c3a0f6238d4ae0e2abfca16e61dd6" }
+external-scanner = { c = true, cpp = false }
+ffi-func = "tree_sitter_fusion"
+package = "tree-sitter-fusion"
+[languages.queries]
+nvim-like = true
+injections = true
+locals = true
 
 [[languages]]
 name = "gap"
@@ -1727,6 +1781,19 @@ nvim-like = true
 injections = false
 locals = false
 
+[[languages]]
+name = "haxe"
+group = "all"
+file-types = ["haxe", "hx"]
+[languages.parser]
+git = { url = "https://github.com/vantreeseba/tree-sitter-haxe", rev = "a55f3e2cf1e4449200fd089a80d3af642bcf5f94" }
+external-scanner = { c = true, cpp = false }
+ffi-func = "tree_sitter_haxe"
+package = "tree-sitter-haxe"
+[languages.queries]
+nvim-like = true
+injections = true
+locals = true
 
 [[languages]]
 name = "hcl"
@@ -2003,7 +2070,7 @@ locals = true
 [[languages]]
 name = "ini"
 group = "most"
-file-types = ["ini"]
+file-types = ["ini", "systemd"]
 [languages.parser]
 git = { url = "https://github.com/justinmk/tree-sitter-ini", rev = "e4018b5176132b4f3c5d6e61cea383f42288d0f5" , branch = "master"}
 external-scanner = { c = false, cpp = false }
@@ -2545,12 +2612,12 @@ name = "lua"
 group = "some"
 file-types = ["lua"]
 [languages.parser]
-git = { url = "https://github.com/tree-sitter-grammars/tree-sitter-lua", rev = "e40f5b6e6df9c2d1d6d664ff5d346a75d71ee6b2" }
+git = { url = "https://github.com/tree-sitter-grammars/tree-sitter-lua", rev = "816840c592ab973500ae9750763c707b447e7fef" }
 external-scanner = { c = true, cpp = false }
 ffi-func = "tree_sitter_lua"
 rust-const = "LANGUAGE"
 package = "tree-sitter-lua"
-crates-io = "0.2.0"
+crates-io = "0.4.1"
 [languages.queries]
 nvim-like = true
 injections = true
@@ -2601,6 +2668,19 @@ nvim-like = true
 injections = true
 locals = true
 
+[[languages]]
+name = "magik"
+group = "all"
+file-types = ["magik"]
+[languages.parser]
+git = { url = "https://github.com/krn-robin/tree-sitter-magik", rev = "0f4f51d372f8f81424e8e5ebf16dab95e8696db6" }
+external-scanner = { c = false, cpp = false }
+ffi-func = "tree_sitter_magik"
+package = "tree-sitter-magik"
+[languages.queries]
+nvim-like = true
+injections = false
+locals = false
 
 [[languages]]
 name = "make"
@@ -3058,6 +3138,19 @@ nvim-like = true
 injections = true
 locals = false
 
+[[languages]]
+name = "pgn"
+group = "all"
+file-types = ["pgn"]
+[languages.parser]
+git = { url = "https://github.com/rolandwalker/tree-sitter-pgn", rev = "b55128fe93d2b8a5d1edc1ce7de9252d2ea7ed35", branch = "master" }
+external-scanner = { c = true, cpp = false }
+ffi-func = "tree_sitter_pgn"
+package = "tree-sitter-pgn"
+[languages.queries]
+nvim-like = true
+injections = false
+locals = false
 
 [[languages]]
 name = "php"
@@ -4097,7 +4190,7 @@ group = "most"
 file-types = ["sql", "mysql"]
 [languages.parser]
 # has deployments on gh-pages branch
-git = { url = "https://github.com/derekstride/tree-sitter-sql", rev = "86e3d03837d282544439620eb74d224586074b8b" , branch = "gh-pages"}
+git = { url = "https://github.com/derekstride/tree-sitter-sql", rev = "7b51ecda191d36b92f5a90a8d1bc3faef1c7b8b8" , branch = "gh-pages"}
 external-scanner = { c = true, cpp = false }
 ffi-func = "tree_sitter_sql"
 rust-const = "LANGUAGE"
@@ -4775,8 +4868,6 @@ package = "tree-sitter-verilog"
 nvim-like = true
 injections = true
 locals = false
-
-
 
 [[languages]]
 name = "vhdl"

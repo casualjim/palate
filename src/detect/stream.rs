@@ -233,7 +233,8 @@ where
 
     // Heuristics for ambiguous extensions
     if let Some(extension) = ext {
-        if let Some(ft) = heuristics::apply_heuristics(extension, path, content) {
+        let dotted_extension = format!(".{extension}");
+        if let Some(ft) = heuristics::apply_heuristics(&dotted_extension, path, content) {
             return Ok((Some(ft), reader));
         }
     }
