@@ -706,6 +706,7 @@ pub(crate) static FILENAME: Map<&'static str, FileTypeResolver> = phf_map! {
     "xinitrc" => FileTypeResolver::Static(FileType::Bash),
     ".xserverrc" => FileTypeResolver::Static(FileType::Bash),
     "xserverrc" => FileTypeResolver::Static(FileType::Bash),
+    "direnvrc" => FileTypeResolver::Static(FileType::Bash),
     ".hpp.in" => FileTypeResolver::Static(FileType::Cpp),
     ".h.in" => FileTypeResolver::Static(FileType::Cpp),
     "containerfile" => FileTypeResolver::Static(FileType::Dockerfile),
