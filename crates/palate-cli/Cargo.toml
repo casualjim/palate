@@ -1,0 +1,26 @@
+[package]
+name = "palate-cli"
+version = "0.3.9"
+edition.workspace = true
+authors.workspace = true
+description = "Command-line interface for Palate file type detection"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["file-type", "detection", "language", "syntax", "linguist"]
+categories = ["command-line-utilities", "development-tools"]
+
+[package.metadata.dist]
+dist = true
+formula = "palate"
+
+[[bin]]
+name = "palate"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true, features = ["std"] }
+ignore.workspace = true
+infer.workspace = true
+palate.workspace = true

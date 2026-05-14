@@ -1,4 +1,4 @@
-use palate::{FileType, detect};
+use palate::{detect, FileType};
 use std::path::Path;
 
 fn main() {

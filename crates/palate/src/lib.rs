@@ -93,8 +93,10 @@ mod tests {
         use std::str::FromStr;
 
         // Parse the languages.toml fixture
-        let content = std::fs::read_to_string("fixtures/languages.toml")
-            .expect("Failed to read languages.toml fixture");
+        let content = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/languages.toml"),
+        )
+        .expect("Failed to read languages.toml fixture");
 
         let toml_data: toml::Value =
             toml::from_str(&content).expect("Failed to parse languages.toml");

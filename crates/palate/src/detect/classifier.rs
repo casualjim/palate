@@ -71,8 +71,7 @@ pub(crate) fn classify(content: &str) -> Option<FileType> {
             Some((best_ft, best_score)) => {
                 let ft_name: &'static str = ft.into();
                 let best_name: &'static str = best_ft.into();
-                let choose = score > best_score
-                    || (score == best_score && ft_name < best_name);
+                let choose = score > best_score || (score == best_score && ft_name < best_name);
                 if choose {
                     best = Some((ft, score));
                 }

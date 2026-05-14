@@ -10,6 +10,9 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/casualjim/palate/tree/master/crates/palate_polyglot_tokenizer"
 
+[package.metadata.dist]
+dist = false
+
 [dependencies]
 circular-queue = "0.2.6"
 

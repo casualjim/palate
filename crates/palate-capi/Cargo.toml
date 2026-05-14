@@ -1,0 +1,39 @@
+[package]
+name = "palate-capi"
+version = "0.3.9"
+edition.workspace = true
+authors.workspace = true
+description = "C API adapter for Palate file type detection"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["file-type", "detection", "ffi", "c-api"]
+categories = ["api-bindings", "development-tools::ffi"]
+
+[package.metadata.dist]
+dist = true
+display-name = "Palate C API"
+formula = "palate-capi"
+installers = ["homebrew"]
+package-libraries = ["cdylib", "cstaticlib"]
+install-libraries = ["cdylib", "cstaticlib"]
+include = ["include", "lib"]
+
+[package.metadata.release]
+pre-release-replacements = [
+    { file = "lib/pkgconfig/palate-capi.pc", search = "Version: [0-9]+\\.[0-9]+\\.[0-9]+", replace = "Version: {{version}}", exactly = 1 },
+]
+
+[lib]
+name = "palate_capi"
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+palate.workspace = true
+
+[build-dependencies]
+cc = "1"
+
+[dev-dependencies]
+cc = "1"
