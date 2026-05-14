@@ -342,10 +342,7 @@ pub fn try_detect(path: impl AsRef<Path>, content: &str) -> Option<FileType> {
         .extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| e.eq_ignore_ascii_case("cp"))
-        && regex_is_match!(
-            r"(?mi)^\s*(?:module|import)\b",
-            get_lines(content, 50)
-        )
+        && regex_is_match!(r"(?mi)^\s*(?:module|import)\b", get_lines(content, 50))
     {
         return Some(FileType::ComponentPascal);
     }
@@ -492,8 +489,10 @@ fn cfg(_path: &Path, content: &str) -> Option<FileType> {
     // TODO: user defined preferred cfg filetype
     // HAProxy configs are typically `.cfg` and start with blocks like:
     // `global`, `defaults`, `frontend`, `backend`, `listen`.
-    if regex_is_match!(r"(?mi)^\s*(global|defaults|frontend|backend|listen)\b", get_lines(content, 50))
-    {
+    if regex_is_match!(
+        r"(?mi)^\s*(global|defaults|frontend|backend|listen)\b",
+        get_lines(content, 50)
+    ) {
         return Some(FileType::Haproxy);
     }
 
@@ -562,7 +561,10 @@ fn cls(_path: &Path, content: &str) -> Option<FileType> {
     } else if regex_is_match!(
         r"(?mi)^\s*(global|public|private|protected)\s+(with\s+sharing\s+)?(class|interface|enum)\b",
         get_lines(content, 120)
-    ) || regex_is_match!(r"(?m)\btrigger\s+\w+\s+on\s+\w+\s*\(", get_lines(content, 200)) {
+    ) || regex_is_match!(
+        r"(?m)\btrigger\s+\w+\s+on\s+\w+\s*\(",
+        get_lines(content, 200)
+    ) {
         Some(FileType::Apex)
     } else {
         Some(FileType::St)
@@ -913,8 +915,10 @@ fn inc(path: &Path, content: &str) -> Option<FileType> {
     }
 
     // Assembly include / macro files (ca65/nasm-style).
-    if regex_is_match!(r"(?mi)^\s*\.(macro|endmacro|segment|define|include)\b", head)
-        || regex_is_match!(r"(?mi)^\s*%macro\b|^\s*%define\b", head)
+    if regex_is_match!(
+        r"(?mi)^\s*\.(macro|endmacro|segment|define|include)\b",
+        head
+    ) || regex_is_match!(r"(?mi)^\s*%macro\b|^\s*%define\b", head)
     {
         return asm(path, content);
     }
@@ -1307,7 +1311,10 @@ fn progress_asm(path: &Path, content: &str) -> Option<FileType> {
             return asm(path, content);
         }
 
-        if regex_is_match!(r"^[A-Za-z_][A-Za-z0-9_]*\s{2,}[A-Za-z.]{2,}\b", trimmed_line) {
+        if regex_is_match!(
+            r"^[A-Za-z_][A-Za-z0-9_]*\s{2,}[A-Za-z.]{2,}\b",
+            trimmed_line
+        ) {
             asm_like = asm_like.saturating_add(1);
         }
 

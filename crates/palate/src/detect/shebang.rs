@@ -63,7 +63,12 @@ pub(crate) fn detect_from_shebang(content: &str) -> Option<FileType> {
     // Special-case: shell wrapper scripts that exec into Scala (seen in the samples suite).
     if matches!(
         ft,
-        FileType::Sh | FileType::Bash | FileType::Zsh | FileType::Ksh | FileType::Csh | FileType::Tcsh
+        FileType::Sh
+            | FileType::Bash
+            | FileType::Zsh
+            | FileType::Ksh
+            | FileType::Csh
+            | FileType::Tcsh
     ) && content
         .lines()
         .take(10)

@@ -1,99 +1,53 @@
-[package]
-name = "palate"
-version = "0.3.9"
+[workspace]
+members = [
+    "crates/palate",
+    "crates/palate-cli",
+    "crates/palate-capi",
+    "crates/palate_polyglot_tokenizer",
+]
+resolver = "2"
+
+[workspace.package]
 edition = "2021"
 authors = ["Ivan <monkslc@gmail.com>"]
-description = "File type detection combining tft and hyperpolyglot"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/casualjim/palate"
-readme = "README.md"
-keywords = ["file-type", "detection", "language", "syntax", "linguist"]
-categories = ["parser-implementations", "development-tools"]
+homepage = "https://github.com/casualjim/palate"
 
-[package.metadata.docs.rs]
-all-features = true
-
-[package.metadata.release]
+[workspace.metadata.release]
 sign-commit = false
-tag = false
-# Add [ci skip] to commit messages to prevent CI triggers
-pre-release-commit-message = "Release {{version}} [ci skip]"
+sign-tag = false
+publish = false
+allow-branch = ["main"]
+pre-release-commit-message = "chore: Release {{crate_name}} version {{version}}"
 
-[[bin]]
-name = "codegen"
-path = "src/bin/codegen.rs"
-required-features = ["codegen"]
-
-[[bin]]
-name = "palate"
-path = "src/bin/palate.rs"
-required-features = ["detect"]
-
-[features]
-default = ["detect"]
-
-## Provide the [`detect`](crate::detect) and [`try_detect`](crate::try_detect) functions for detecting a
-## file type from a path and file content
-detect = [
-    "dep:aho-corasick",
-    "dep:lazy-regex",
-    "dep:once_cell",
-    "dep:phf",
-    "dep:regex",
-    "dep:fancy-regex",
-]
-
-## Enable the local-only `codegen` binary (`src/bin/codegen.rs`).
-##
-## This is intentionally not enabled by default so `cargo install palate` doesn't build it.
-codegen = [
-    "dep:convert_case",
-    "dep:phf_codegen",
-    "dep:serde",
-    "dep:serde_norway",
-    "dep:fancy-regex",
-    "dep:palate_polyglot_tokenizer",
-]
-
-## Provide async API with [`PeekableReader`](detect::PeekableReader) and [`detect_with_reader`](detect::detect_with_reader)
-tokio = ["detect", "dep:tokio"]
-
-## Provide [`serde::Serialize`] and [`serde::Deserialize`] implementations for [`FileType`]
-serde = ["dep:serde", "dep:serde_with"]
-
-## Enable classifier-based detection
-classifier = ["detect"]
-
-[dependencies]
-aho-corasick = { version = "1.0", optional = true }
+[workspace.dependencies]
+aho-corasick = "1.0"
 casey = "0.4"
-clap = { version = "4.5", features = ["std"] }
-convert_case = { version = "0.10.0", optional = true }
+cc = "1"
+clap = "4.5"
+convert_case = "0.10.0"
+fancy-regex = "0.14"
 ignore = "0.4"
 infer = "0.19"
-lazy-regex = { version = "3.0", optional = true }
-once_cell = { version = "1.18", optional = true }
-fancy-regex = { version = "0.14", optional = true }
-phf = { version = "0.12.1", features = ["macros"], optional = true }
-phf_codegen = { version = "0.12.1", optional = true }
-regex = { version = "1.9", optional = true }
-serde = { version = "1.0", features = ["derive"], optional = true }
-serde_norway = { version = "0.9", optional = true }
-serde_with = { version = "3", optional = true }
-strum = { version = "0.27", features = ["derive", "phf"] }
-strum_macros = "0.27"
-termcolor = "1.4"
-tokio = { version = "1", features = ["fs", "io-util", "rt"], optional = true }
-
-[dependencies.palate_polyglot_tokenizer]
-version = "0.2.1"
-path = "crates/palate_polyglot_tokenizer"
-optional = true
-
-[dev-dependencies]
-serde = { version = "1.0", features = ["derive"] }
+lazy-regex = "3.0"
+once_cell = "1.18"
+palate = { path = "crates/palate" }
+palate_polyglot_tokenizer = { path = "crates/palate_polyglot_tokenizer", version = "0.2.1" }
+phf = "0.12.1"
+phf_codegen = "0.12.1"
+regex = "1.9"
+serde = "1.0"
 serde_json = "1.0"
 serde_norway = "0.9"
-tokio = { version = "1", features = ["macros"] }
+serde_with = "3"
+strum = "0.27"
+strum_macros = "0.27"
+termcolor = "1.4"
+tokio = "1"
 toml = "0.8"
 walkdir = "2"
+
+[profile.dist]
+inherits = "release"
+lto = "thin"

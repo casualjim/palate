@@ -16,15 +16,21 @@ struct GrammarsMappingEntry {
     nvim_parser: Option<String>,
 }
 
+fn package_path(path: &str) -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(path)
+}
+
 fn read_languages_yml() -> HashMap<String, LanguageEntry> {
-    let content = std::fs::read_to_string("languages.yml").expect("read languages.yml");
+    let content =
+        std::fs::read_to_string(package_path("languages.yml")).expect("read languages.yml");
     serde_norway::from_str(&content).expect("parse languages.yml")
 }
 
 fn read_filetype_to_parser_map() -> Option<HashMap<FileType, Vec<String>>> {
     use std::str::FromStr;
 
-    let content = std::fs::read_to_string("target/grammars-mapping-enhanced.json").ok()?;
+    let content =
+        std::fs::read_to_string(package_path("target/grammars-mapping-enhanced.json")).ok()?;
     let entries: Vec<GrammarsMappingEntry> = serde_json::from_str(&content).ok()?;
 
     let mut map: HashMap<FileType, Vec<String>> = HashMap::new();
@@ -37,7 +43,12 @@ fn read_filetype_to_parser_map() -> Option<HashMap<FileType, Vec<String>>> {
             .trim()
             .to_string();
         let ft_name = if ft_name.is_empty() {
-            entry.nvim_filetype.as_deref().unwrap_or("").trim().to_string()
+            entry
+                .nvim_filetype
+                .as_deref()
+                .unwrap_or("")
+                .trim()
+                .to_string()
         } else {
             ft_name
         };
@@ -45,14 +56,14 @@ fn read_filetype_to_parser_map() -> Option<HashMap<FileType, Vec<String>>> {
             continue;
         }
 
-        let parser_id = entry
-            .grammar
-            .as_deref()
-            .unwrap_or("")
-            .trim()
-            .to_string();
+        let parser_id = entry.grammar.as_deref().unwrap_or("").trim().to_string();
         let parser_id = if parser_id.is_empty() {
-            entry.nvim_parser.as_deref().unwrap_or("").trim().to_string()
+            entry
+                .nvim_parser
+                .as_deref()
+                .unwrap_or("")
+                .trim()
+                .to_string()
         } else {
             parser_id
         };
@@ -186,7 +197,10 @@ fn acceptable_filetypes(expected: FileType) -> Vec<FileType> {
             ],
         ),
         // HCL is effectively Terraform-family in most corpora.
-        (FileType::Hcl, &[FileType::Terraform, FileType::TerraformVars]),
+        (
+            FileType::Hcl,
+            &[FileType::Terraform, FileType::TerraformVars],
+        ),
         // R documentation and related files are often detected as RHelp.
         (FileType::R, &[FileType::RHelp]),
         // JSONC is JSON with comments; accept plain JSON.
@@ -268,7 +282,7 @@ fn acceptable_filetypes(expected: FileType) -> Vec<FileType> {
 /// Accuracy test against `./samples/` (copied from hyperpolyglot).
 #[test]
 fn samples_accuracy() {
-    let samples_dir = Path::new("samples");
+    let samples_dir = package_path("samples");
     if !samples_dir.is_dir() {
         panic!("missing ./samples directory");
     }
@@ -295,7 +309,7 @@ fn samples_accuracy() {
     // This reduces taxonomy churn while keeping correctness aligned with what we can actually parse.
     let filetype_to_parser = read_filetype_to_parser_map();
 
-    for entry in std::fs::read_dir(samples_dir).expect("read samples dir") {
+    for entry in std::fs::read_dir(&samples_dir).expect("read samples dir") {
         let entry = entry.expect("read samples entry");
         if !entry.file_type().expect("samples entry filetype").is_dir() {
             continue;
@@ -391,7 +405,7 @@ fn samples_accuracy() {
 
     if skipped_languages != 0 {
         panic!("samples_accuracy: {skipped_languages} sample language directories were not found in languages.yml (first 50 shown):\n{}",
-            std::fs::read_dir(samples_dir)
+            std::fs::read_dir(&samples_dir)
                 .ok()
                 .into_iter()
                 .flat_map(|it| it.filter_map(Result::ok))

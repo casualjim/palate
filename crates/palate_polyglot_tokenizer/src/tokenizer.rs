@@ -1,4 +1,3 @@
-use circular_queue::CircularQueue;
 use std::{
     collections::VecDeque,
     iter::{DoubleEndedIterator, Peekable},
@@ -211,31 +210,27 @@ impl<'a> Tokens<'a> {
         content_idx: usize,
         end_sequence: &Vec<char>,
     ) -> Result<(&'a str, &'a str), Token<'a>> {
-        // start with a random char '@' that won't match the closure check
-        let mut prev_chars = CircularQueue::with_capacity(end_sequence.len());
-        let mut take_if = |ch| {
-            let should_take = prev_chars.iter().eq(end_sequence.iter());
-            if should_take {
-                prev_chars.push(ch);
-            }
-            should_take
-        };
-
-        let end = self.take_if(&mut take_if);
-        if prev_chars.iter().eq(end_sequence.iter()) {
-            let end_sequence_start = end - end_sequence.len();
-            let content = self.slice(content_idx, end_sequence_start);
-            let end_sequence = self.slice(end_sequence_start, end);
-            Ok((content, end_sequence))
-        } else {
+        let end_sequence_text: String = end_sequence.iter().collect();
+        let Some(relative_end_start) = self.content[content_idx..].find(&end_sequence_text) else {
             let backlog_start = self.token_start() + 1;
             let backlog_chars = self
-                .slice(backlog_start, end)
+                .slice(backlog_start, content_idx)
                 .char_indices()
                 .map(|(idx, ch)| (idx + backlog_start, ch));
             self.push_backlog(backlog_chars);
-            Err(Token::Symbol(self.slice_from_token_start(backlog_start)))
+            return Err(Token::Symbol(self.slice_from_token_start(backlog_start)));
+        };
+
+        let end_sequence_start = content_idx + relative_end_start;
+        let end = end_sequence_start + end_sequence_text.len();
+        while self.peek().is_some_and(|(idx, _)| idx < end) {
+            self.advance();
         }
+
+        Ok((
+            self.slice(content_idx, end_sequence_start),
+            self.slice(end_sequence_start, end),
+        ))
     }
 }
 
@@ -690,7 +685,7 @@ mod tests {
             BlockComment("<!--", " Comment Here", "-->"),
             BlockComment(
                 "<!--",
-                " \n         Multi line\n         Comment\n         ",
+                "\n         Multi line\n         Comment\n         ",
                 "-->",
             ),
             BlockComment("<!--", "", "-->"),

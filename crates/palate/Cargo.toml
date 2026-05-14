@@ -1,0 +1,73 @@
+[package]
+name = "palate"
+version = "0.3.9"
+edition.workspace = true
+authors.workspace = true
+description = "File type detection combining tft and hyperpolyglot"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["file-type", "detection", "language", "syntax", "linguist"]
+categories = ["parser-implementations", "development-tools"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[package.metadata.dist]
+dist = false
+
+[[bin]]
+name = "codegen"
+path = "src/bin/codegen.rs"
+required-features = ["codegen"]
+
+[features]
+default = ["detect"]
+
+detect = [
+    "dep:aho-corasick",
+    "dep:lazy-regex",
+    "dep:once_cell",
+    "dep:phf",
+    "dep:regex",
+    "dep:fancy-regex",
+]
+codegen = [
+    "dep:convert_case",
+    "dep:phf_codegen",
+    "dep:serde",
+    "dep:serde_norway",
+    "dep:fancy-regex",
+    "dep:palate_polyglot_tokenizer",
+]
+tokio = ["detect", "dep:tokio"]
+serde = ["dep:serde", "dep:serde_with"]
+classifier = ["detect"]
+
+[dependencies]
+aho-corasick = { workspace = true, optional = true }
+casey.workspace = true
+convert_case = { workspace = true, optional = true }
+fancy-regex = { workspace = true, optional = true }
+infer.workspace = true
+lazy-regex = { workspace = true, optional = true }
+once_cell = { workspace = true, optional = true }
+palate_polyglot_tokenizer = { workspace = true, optional = true }
+phf = { workspace = true, features = ["macros"], optional = true }
+phf_codegen = { workspace = true, optional = true }
+regex = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"], optional = true }
+serde_norway = { workspace = true, optional = true }
+serde_with = { workspace = true, optional = true }
+strum = { workspace = true, features = ["derive", "phf"] }
+strum_macros.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util", "rt"], optional = true }
+
+[dev-dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+serde_norway.workspace = true
+tokio = { workspace = true, features = ["macros"] }
+toml.workspace = true
+walkdir.workspace = true

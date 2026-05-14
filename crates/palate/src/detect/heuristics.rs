@@ -126,9 +126,6 @@ mod tests {
     fn test_heuristics_mod_fallback_returns_first_language() {
         // `.mod` includes a fallback rule (no pattern) with multiple candidate languages.
         // Our current implementation treats this as "still ambiguous".
-        assert_eq!(
-            apply_heuristics(".mod", Path::new("x.mod"), ""),
-            None
-        );
+        assert_eq!(apply_heuristics(".mod", Path::new("x.mod"), ""), None);
     }
 }

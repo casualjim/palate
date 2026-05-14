@@ -177,9 +177,15 @@ const HEURISTICS_SOURCE_FILE: &str = "heuristics.yml";
 
 const MAX_TOKEN_BYTES: usize = 32;
 
+fn package_path(path: &str) -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(path)
+}
+
 fn main() {
-    let heuristics: Heuristics =
-        serde_norway::from_str(&fs::read_to_string(HEURISTICS_SOURCE_FILE).unwrap()[..]).unwrap();
+    let heuristics: Heuristics = serde_norway::from_str(
+        &fs::read_to_string(package_path(HEURISTICS_SOURCE_FILE)).unwrap()[..],
+    )
+    .unwrap();
 
     // Validate all regex patterns before generating code
     validate_all_patterns(&heuristics);
@@ -187,7 +193,7 @@ fn main() {
     create_disambiguation_heuristics_map(heuristics);
 
     // Only train classifier if samples directory exists
-    if Path::new("samples").exists() {
+    if package_path("samples").exists() {
         train_classifier();
     } else {
         println!("Note: Skipping classifier training - 'samples' directory not found");
@@ -231,14 +237,13 @@ fn validate_all_patterns(heuristics: &Heuristics) {
         }
     }
 
-    println!("✓ Validated {} regex patterns with fancy-regex", pattern_count);
+    println!(
+        "✓ Validated {} regex patterns with fancy-regex",
+        pattern_count
+    );
 }
 
-fn validate_pattern_dto(
-    pattern: &PatternDTO,
-    named_patterns: &NamedPatterns,
-    count: &mut usize,
-) {
+fn validate_pattern_dto(pattern: &PatternDTO, named_patterns: &NamedPatterns, count: &mut usize) {
     match pattern {
         PatternDTO::Positive(MaybeMany::One(p)) | PatternDTO::Negative(p) => {
             let translated = translate_pcre2_to_fancy_regex(p);
@@ -273,7 +278,8 @@ fn validate_pattern_dto(
 }
 
 fn create_disambiguation_heuristics_map(heuristics: Heuristics) {
-    let mut file = BufWriter::new(File::create(DISAMBIGUATION_HEURISTICS_FILE).unwrap());
+    let mut file =
+        BufWriter::new(File::create(package_path(DISAMBIGUATION_HEURISTICS_FILE)).unwrap());
 
     let mut temp_map: HashMap<String, String> = HashMap::new();
     for mut dis in heuristics.disambiguations.into_iter() {
@@ -310,7 +316,7 @@ fn train_classifier() {
     let mut temp_token_count: HashMap<String, HashMap<String, i32>> = HashMap::new();
     let mut temp_total_tokens_count = HashMap::new();
 
-    fs::read_dir("samples")
+    fs::read_dir(package_path("samples"))
         .unwrap()
         .map(|entry| entry.unwrap())
         .filter(|entry| entry.path().is_dir())
@@ -358,7 +364,7 @@ fn train_classifier() {
         });
 
     // Write token log probabilities
-    let mut file = BufWriter::new(File::create(TOKEN_LOG_PROBABILITY_FILE).unwrap());
+    let mut file = BufWriter::new(File::create(package_path(TOKEN_LOG_PROBABILITY_FILE)).unwrap());
     let mut language_entries: Vec<(String, String)> = Vec::new();
     for (language, token_count_map) in temp_token_count.iter() {
         let total_tokens = *temp_total_tokens_count.get(language).unwrap() as f64;

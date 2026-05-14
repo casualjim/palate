@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 #MISE description="Build the application (Release)"
-#MISE sources=["Cargo.toml", "src/**/*.rs"]
-#MISE outputs=["target/debug/context"]
+#MISE sources=["Cargo.toml", "crates/**/*.rs"]
+#MISE outputs=["target/release/palate"]
 #MISE depends=["test"]
 
 echo "🚀 Starting Frontend release build..."

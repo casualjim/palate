@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 #MISE description="Run the Rust tests for this project"
-#MISE sources=["Cargo.toml", "src/**/*.rs"]
+#MISE sources=["Cargo.toml", "crates/**/*.rs"]
 
 echo "🚀 Starting Frontend Rust tests..."
 proj_dir=$(git rev-parse --show-toplevel)

@@ -1,6 +1,6 @@
 use clap::{Arg, Command};
-use infer::{Infer, MatcherType};
 use ignore::WalkBuilder;
+use infer::{Infer, MatcherType};
 use std::{
     collections::HashMap,
     fs::File,
@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use palate::{FileType, detect, is_text_file, try_detect};
+use palate::{detect, is_text_file, try_detect, FileType};
 
 const MAX_CONTENT_SIZE_BYTES: usize = 51_200;
 
