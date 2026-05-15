@@ -1,6 +1,6 @@
 [package]
 name = "palate-capi"
-version = "0.3.9"
+version = "0.4.0"
 edition.workspace = true
 authors.workspace = true
 description = "C API adapter for Palate file type detection"
