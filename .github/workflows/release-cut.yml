@@ -135,6 +135,13 @@ jobs:
           git commit -m "chore: update changelog for v${{ steps.version.outputs.next_version }} [ci skip]"
       - name: Run cargo-release
         run: cargo release ${{ steps.version.outputs.next_version }} --package palate --package palate-cli --package palate-capi --no-confirm --no-publish --no-push --execute
+      - name: Create release tag
+        env:
+          TAG_NAME: v${{ steps.version.outputs.next_version }}
+        run: |
+          if ! git rev-parse "refs/tags/${TAG_NAME}" >/dev/null 2>&1; then
+            git tag "${TAG_NAME}"
+          fi
       - name: Push release commit with GITHUB_TOKEN
         run: |
           git config --unset-all http.https://github.com/.extraheader || true
