@@ -141,7 +141,15 @@ jobs:
           git commit -m "chore: update changelog for v${{ steps.version.outputs.next_version }} [ci skip]"
       - name: Run cargo-release
         if: steps.bump.outputs.bump != 'none'
-        run: cargo release ${{ steps.version.outputs.next_version }} --package palate --package palate-cli --package palate-capi --no-confirm --no-publish --no-push --execute
+        run: cargo release ${{ steps.version.outputs.next_version }} --package palate --package palate-cli --package palate-capi --package palate-py --package palate-napi --no-confirm --no-publish --no-push --execute
+      - name: Update npm package version
+        if: steps.bump.outputs.bump != 'none'
+        run: npm --prefix crates/palate-napi version ${{ steps.version.outputs.next_version }} --no-git-tag-version --allow-same-version
+      - name: Commit npm package version
+        if: steps.bump.outputs.bump != 'none'
+        run: |
+          git add crates/palate-napi/package.json crates/palate-napi/package-lock.json
+          git commit --amend --no-edit
       - name: Create release tag
         if: steps.bump.outputs.bump != 'none'
         env:

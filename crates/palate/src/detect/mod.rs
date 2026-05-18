@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{borrow::Cow, path::Path};
 
 use aho_corasick::AhoCorasick;
 use infer::Infer;
@@ -41,6 +41,28 @@ pub use stream::*;
 /// ```
 pub fn detect(path: impl AsRef<Path>, content: &str) -> FileType {
     try_detect(path, content).unwrap_or(FileType::Text)
+}
+
+/// Same as [`detect`] but accepts caller-provided content bytes.
+///
+/// Bytes are converted with [`String::from_utf8_lossy`] before detection, matching
+/// the runtime adapter contract used by the C, Python, Node.js, and Go bindings.
+/// Embedded NUL bytes are preserved during conversion.
+pub fn detect_bytes(path: impl AsRef<Path>, content: &[u8]) -> FileType {
+    try_detect_bytes(path, content).unwrap_or(FileType::Text)
+}
+
+/// Try to detect a [`FileType`] from caller-provided content bytes.
+///
+/// Bytes are converted with [`String::from_utf8_lossy`] before detection, matching
+/// the runtime adapter contract used by the C, Python, Node.js, and Go bindings.
+/// Embedded NUL bytes are preserved during conversion.
+pub fn try_detect_bytes(path: impl AsRef<Path>, content: &[u8]) -> Option<FileType> {
+    let content = String::from_utf8_lossy(content);
+    match content {
+        Cow::Borrowed(content) => try_detect(path, content),
+        Cow::Owned(content) => try_detect(path, &content),
+    }
 }
 
 /// Try to detect a [`FileType`] given a file's path and content.

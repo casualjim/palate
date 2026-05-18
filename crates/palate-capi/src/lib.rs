@@ -92,12 +92,10 @@ unsafe fn detect_impl(
         Ok(content) => content,
         Err(status) => return status,
     };
-    let content = String::from_utf8_lossy(content);
-
     let result = if fallback {
-        Some(palate::detect(Path::new(path), &content))
+        Some(palate::detect_bytes(Path::new(path), content))
     } else {
-        palate::try_detect(Path::new(path), &content)
+        palate::try_detect_bytes(Path::new(path), content)
     };
 
     match result {

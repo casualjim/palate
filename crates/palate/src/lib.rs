@@ -69,6 +69,26 @@ mod tests {
     }
 
     #[test]
+    fn byte_detection_accepts_embedded_nul() {
+        let content = b"fn main() {\0}\n";
+        assert_eq!(FileType::Rust, detect_bytes(Path::new("main.rs"), content));
+        assert_eq!(
+            Some(FileType::Rust),
+            try_detect_bytes(Path::new("main.rs"), content)
+        );
+    }
+
+    #[test]
+    fn byte_detection_uses_lossy_utf8() {
+        let content = b"\xff\xfe\xfd";
+        assert_eq!(
+            FileType::Text,
+            detect_bytes(Path::new("unknown.file"), content)
+        );
+        assert_eq!(None, try_detect_bytes(Path::new("unknown.file"), content));
+    }
+
+    #[test]
     fn ts_extension_detects_qt_ts_as_xml() {
         let qt_ts = "<TS version=\"2.1\" language=\"en_US\"></TS>\n";
         assert_eq!(FileType::Xml, detect(Path::new("app.ts"), qt_ts));

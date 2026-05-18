@@ -7,14 +7,14 @@ members = ["cargo:."]
 cargo-dist-version = "0.30.3"
 # CI backends to support
 ci = "github"
-# Keep release.yml hand-extended for C API packaging metadata.
-allow-dirty = ["ci"]
 # Release only the installable CLI and the C API adapter.
 packages = ["palate-cli", "palate-capi"]
 # The installers to generate for the CLI app
 installers = ["shell", "powershell", "homebrew"]
+# Custom jobs to run after artifacts are built and before hosting/publishing.
+host-jobs = ["./patch-palate-capi-homebrew-formula"]
 # Publish jobs to run in CI
-publish-jobs = ["homebrew"]
+publish-jobs = ["homebrew", "./publish-npm-bindings", "./publish-pypi-bindings"]
 # Target platforms to build apps/libraries for (Rust target-triple syntax)
 targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
 # A GitHub repo to push Homebrew formulas to
@@ -27,6 +27,10 @@ hosting = "github"
 install-updater = false
 # Whether to enable GitHub Attestations
 github-attestations = true
+
+[dist.github-custom-job-permissions]
+publish-npm-bindings = { contents = "read", id-token = "write" }
+publish-pypi-bindings = { contents = "read", id-token = "write" }
 
 [dist.github-custom-runners]
 # Prefer native runners (no cross builds)

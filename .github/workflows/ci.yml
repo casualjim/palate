@@ -34,3 +34,28 @@ jobs:
       - name: Run workspace tests
         run: |
           cargo nextest run --workspace --all-features --no-tests pass
+
+      - name: Test Python binding
+        run: |
+          mise exec -- env -u UV_PYTHON uv venv .venv
+          mise exec -- env -u UV_PYTHON uv pip install --python .venv maturin pytest
+          mise exec -- .venv/bin/python -m maturin build --manifest-path crates/palate-py/Cargo.toml --out target/wheels
+          mise exec -- env -u UV_PYTHON uv pip install --python .venv --force-reinstall target/wheels/palate-*.whl
+          mise exec -- .venv/bin/python -m pytest crates/palate-py/tests
+
+      - name: Test Node binding
+        run: |
+          npm --prefix crates/palate-napi install
+          npm --prefix crates/palate-napi run build
+          npm --prefix crates/palate-napi test
+
+      - name: Test Go binding
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/target/debug
+        run: |
+          cd bindings/go
+          go test ./...
+
+      - name: Check WASM target build
+        run: |
+          scripts/check-wasm-target.sh

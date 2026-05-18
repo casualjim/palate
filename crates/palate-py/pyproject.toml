@@ -1,0 +1,23 @@
+[build-system]
+requires = ["maturin>=1.8,<2"]
+build-backend = "maturin"
+
+[project]
+name = "palate"
+description = "Python bindings for Palate file type detection"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "Ivan", email = "monkslc@gmail.com" }]
+keywords = ["file-type", "detection", "syntax", "language"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Rust",
+  "Topic :: Software Development",
+]
+dynamic = ["version"]
+
+[tool.maturin]
+manifest-path = "Cargo.toml"
+module-name = "palate"
+features = ["pyo3/extension-module"]

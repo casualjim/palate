@@ -1,0 +1,35 @@
+name: Patch palate-capi Homebrew formula
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+jobs:
+  patch:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Download global artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: artifacts-build-global
+          path: target/distrib/
+      - name: Patch palate-capi formula
+        run: |
+          if [ -f target/distrib/palate-capi.rb ]; then
+            scripts/patch-palate-capi-homebrew-formula.py target/distrib/palate-capi.rb
+            echo "patched palate-capi Homebrew formula for include/lib/pkg-config layout"
+          else
+            echo "palate-capi Homebrew formula not present; nothing to patch"
+          fi
+      - name: Upload patched global artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-build-global
+          path: target/distrib/
+          overwrite: true

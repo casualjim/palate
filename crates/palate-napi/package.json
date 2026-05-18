@@ -1,0 +1,32 @@
+{
+  "name": "@casualjim/palate",
+  "version": "0.4.0",
+  "description": "Node.js native bindings for Palate file type detection",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "license": "GPL-3.0-or-later",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "*.node"
+  ],
+  "scripts": {
+    "build": "napi build --platform --release",
+    "test": "node test/smoke.mjs"
+  },
+  "napi": {
+    "binaryName": "palate-napi",
+    "targets": [
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-pc-windows-msvc",
+      "x86_64-unknown-linux-gnu"
+    ]
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.0.0"
+  }
+}

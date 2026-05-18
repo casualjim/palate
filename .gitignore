@@ -55,3 +55,4 @@ temp_objects/
 .claude/
 target/
 *.txt
+*.node
