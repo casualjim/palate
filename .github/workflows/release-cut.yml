@@ -75,7 +75,7 @@ jobs:
 
             const lower = text.toLowerCase();
             const found = bumpTokens.filter((t) => lower.includes(t.token));
-            let bump = context.eventName === 'workflow_dispatch' ? 'patch' : 'none';
+            let bump = 'patch';
             if (found.length > 0) {
               if (found.some((t) => t.level === 'major')) {
                 bump = 'major';
@@ -93,9 +93,8 @@ jobs:
             core.setOutput('head_sha', headSha);
             core.setOutput('source', source);
             core.setOutput('bump', bump);
-      - name: No release requested
-        if: steps.bump.outputs.bump == 'none'
-        run: echo "No bump token found; skipping release cut."
+      - name: Selected release bump
+        run: echo "Selected ${{ steps.bump.outputs.bump }} release bump from ${{ steps.bump.outputs.source }}."
       - name: Compute next version
         if: steps.bump.outputs.bump != 'none'
         id: version
