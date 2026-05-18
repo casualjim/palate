@@ -1,5 +1,7 @@
 [settings]
 experimental = true
+python.uv_venv_auto = "create|source"
+
 
 [tools]
 "aqua:nextest-rs/nextest/cargo-nextest" = "latest"
@@ -10,3 +12,7 @@ rust = { version = "latest", profile = "default", components = "llvm-tools,rust-
 node = "lts"
 bun = "latest"
 pkl = "latest"
+uv = "latest"
+
+[env]
+UV_PYTHON = { value = ".venv", tools = true }

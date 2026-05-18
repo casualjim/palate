@@ -32,6 +32,9 @@ This repository is a Cargo workspace with focused packages:
 - `crates/palate` (`palate`): the Rust library and detection API.
 - `crates/palate-cli` (`palate-cli`): the command-line application; installs the `palate` binary.
 - `crates/palate-capi` (`palate-capi`): the C API adapter.
+- `crates/palate-py` (`palate`): the PyO3/maturin Python binding.
+- `crates/palate-napi` (`@casualjim/palate`): the napi-rs Node.js binding.
+- `bindings/go`: the cgo Go binding around `palate-capi`.
 - `crates/palate_polyglot_tokenizer`: tokenizer helper used by code generation.
 
 The CLI moved to the dedicated `palate-cli` package. To install the command-line tool from this repository while preserving the `palate` executable name, run:
@@ -96,18 +99,45 @@ int main(void) {
 
 `palate_detect` falls back to `text`; `palate_try_detect` returns `PALATE_STATUS_NO_MATCH` when nothing matches. Returned file type strings are canonical, null-terminated, library-owned names.
 
-## Releases
+## Runtime bindings
 
-GitHub releases are produced with `cargo-dist`, following the same release-cut flow used by sibling projects. Release artifacts include:
+Python, Node.js, and Go expose the same small runtime API over a path/name and caller-provided content:
 
-- `palate-cli-<target>` archives and shell/PowerShell/Homebrew installers for the `palate` binary.
-- `palate-capi-<target>` archives containing `include/palate.h`, the C-linkable `palate_capi` libraries, and `lib/pkgconfig/palate-capi.pc`.
+| Runtime | Version | Detect with fallback | Try-detect absence |
+| --- | --- | --- | --- |
+| Python | `palate.version()` | `palate.detect(path, content)` | `palate.try_detect(...) is None` |
+| Node.js | `palate.version()` | `palate.detect(path, content)` | `palate.tryDetect(...) === null` |
+| Go | `palate.Version()` | `palate.Detect(path, content)` | `("", false, nil)` |
 
-The C API archives are intended for C/C++ and other FFI consumers. Set `PKG_CONFIG_PATH` to the unpacked archive's `lib/pkgconfig` directory and use `pkg-config --cflags --libs palate-capi`.
+Content bytes are converted with lossy UTF-8 before detection and embedded NUL bytes do not truncate input. Python primarily accepts `bytes` and also accepts `str` as a convenience. Node accepts `Buffer` and `Uint8Array`. Go accepts `[]byte`.
 
-## WASM adapter status
+Local binding checks:
 
-This workspace intentionally does not include a WASM adapter in this change. If WASM support is needed later, it should be added as a separate focused adapter crate rather than expanding the core `palate` library or the C API adapter.
+```sh
+mise exec -- env -u UV_PYTHON uv venv .venv
+mise exec -- env -u UV_PYTHON uv pip install --python .venv maturin pytest
+mise exec -- .venv/bin/python -m maturin develop --manifest-path crates/palate-py/Cargo.toml
+mise exec -- .venv/bin/python -m pytest crates/palate-py/tests
+
+npm --prefix crates/palate-napi install
+npm --prefix crates/palate-napi run build
+npm --prefix crates/palate-napi test
+
+cargo build -p palate-capi
+LD_LIBRARY_PATH="$PWD/target/debug:${LD_LIBRARY_PATH:-}" \
+  DYLD_LIBRARY_PATH="$PWD/target/debug:${DYLD_LIBRARY_PATH:-}" \
+  sh -c 'cd bindings/go && go test ./...'
+```
+
+These initial bindings intentionally do not include file reading helpers, directory scanning, ignore-file handling, or CLI traversal helpers.
+
+## WASM target status
+
+This workspace intentionally does not include a WASM adapter crate in this change. The core `palate` crate is checked for `wasm32-unknown-unknown` compatibility with detection enabled:
+
+```sh
+scripts/check-wasm-target.sh
+```
 
 ## Detection Pipeline
 

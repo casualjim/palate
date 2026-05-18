@@ -1,0 +1,19 @@
+[package]
+name = "palate-napi"
+version = "0.4.0"
+edition.workspace = true
+authors.workspace = true
+description = "Node.js bindings for Palate file type detection"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[lib]
+name = "palate_napi"
+crate-type = ["cdylib"]
+
+[dependencies]
+napi.workspace = true
+napi-derive.workspace = true
+palate.workspace = true

@@ -1,0 +1,22 @@
+[package]
+name = "palate-py"
+version = "0.4.0"
+edition.workspace = true
+authors.workspace = true
+description = "Python bindings for Palate file type detection"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[lib]
+name = "palate"
+crate-type = ["cdylib"]
+
+[dependencies]
+palate_core = { package = "palate", path = "../palate" }
+pyo3 = { workspace = true, features = ["extension-module", "abi3-py39"] }
+
+[package.metadata.maturin]
+module-name = "palate"
+features = ["pyo3/extension-module"]
